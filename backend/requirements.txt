@@ -1,0 +1,12 @@
+mediapipe
+opencv-python
+torch
+torchvision
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy
+pymysql
+"passlib[bcrypt]" python-jose[cryptography]
+email-validator
+
