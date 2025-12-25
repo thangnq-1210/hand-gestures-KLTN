@@ -1,7 +1,10 @@
-"use client"
+// "use client"
 
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
+import { useAuth } from "@/lib/auth-context"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
 interface GestureClass {
   id: string | number
@@ -9,9 +12,19 @@ interface GestureClass {
   text: string
 }
 
+interface DbGestureMapping {
+  model_label: string
+  default_text: string
+  custom_text?: string | null
+  effective_text: string
+}
+
 export default function GestureMapping() {
   const [gestures, setGestures] = useState<GestureClass[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const { token, isAuthenticated } = useAuth()
 
   // Default gesture mapping (fallback)
   const defaultGestures: GestureClass[] = [
@@ -27,18 +40,39 @@ export default function GestureMapping() {
     const fetchGestures = async () => {
       try {
         setIsLoading(true)
+        setError(null)
 
-        // ✅ Gọi API lấy danh sách cử chỉ
-        const response = await fetch("/api/gesture/classes")
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch gesture classes")
+        // ❌ Nếu chưa đăng nhập thì dùng cấu hình mặc định
+        if (!isAuthenticated || !token || !API_BASE_URL) {
+          setGestures(defaultGestures)
+          return
         }
 
-        const data = await response.json()
-        setGestures(data.classes || defaultGestures)
-      } catch (error) {
-        console.error("Error fetching gesture classes:", error)
+        // ✅ Gọi API lấy mapping cử chỉ từ DB (đã tuỳ chỉnh theo user)
+        const response = await fetch(`${API_BASE_URL}/gestures/my-mapping`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || "Không lấy được mapping cử chỉ từ server")
+        }
+
+        const data: DbGestureMapping[] = await response.json()
+
+        // Map về dạng GestureClass cho UI
+        const mapped: GestureClass[] = data.map((g) => ({
+          id: g.model_label,
+          name: `Cử chỉ ${g.model_label}`,
+          text: g.effective_text || g.custom_text || g.default_text,
+        }))
+
+        setGestures(mapped.length > 0 ? mapped : defaultGestures)
+      } catch (err) {
+        console.error("Error fetching gesture mapping:", err)
+        setError("Không tải được cử chỉ từ máy chủ, dùng cấu hình mặc định.")
         setGestures(defaultGestures)
       } finally {
         setIsLoading(false)
@@ -46,18 +80,24 @@ export default function GestureMapping() {
     }
 
     fetchGestures()
-  }, [])
+  }, [isAuthenticated, token])
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold text-primary">Bảng Cử Chỉ</h2>
+      <h2 className="text-2xl font-bold text-teal-500">Bảng Cử Chỉ</h2>
+
+      {error && (
+        <p className="text-sm text-amber-500">
+          {error}
+        </p>
+      )}
 
       {isLoading ? (
         <div className="text-center py-8">
           <p className="text-muted-foreground">Đang tải danh sách cử chỉ...</p>
         </div>
       ) : (
-        <div className="space-y-2 max-h-96 overflow-y-auto">
+        <div className="space-y-2">
           {gestures.map((gesture) => (
             <Card
               key={gesture.id}
@@ -74,7 +114,7 @@ export default function GestureMapping() {
                     </p>
                   </div>
                 </div>
-                <p className="text-lg font-bold text-primary ml-13 leading-tight">
+                <p className="text-lg font-bold text-teal-500 ml-13 leading-tight">
                   "{gesture.text}"
                 </p>
               </div>

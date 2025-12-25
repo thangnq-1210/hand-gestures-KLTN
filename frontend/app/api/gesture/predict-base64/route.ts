@@ -24,48 +24,51 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // gọi backend FastAPI
+    // 🔑 Lấy header Authorization từ client
+    const authHeader = request.headers.get("authorization")
+    console.log("▶ [API route] Authorization nhận được:", authHeader)
+
+    // Gọi backend FastAPI
     const backendRes = await fetch(
       `${BACKEND_URL}/gesture/predict-base64`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_base64: image }),
+        headers: {
+          "Content-Type": "application/json",
+          // 🔑 FORWARD Authorization xuống backend
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+        // ⚠️ GesturePredictRequest có field "image"
+        body: JSON.stringify({ image }),
       },
     )
 
     const textBody = await backendRes.text()
 
     if (!backendRes.ok) {
-      console.error(
-        "[frontend] backend error:",
-        backendRes.status,
-        textBody,
-      )
-      return NextResponse.json(
-        {
-          error: "Backend error",
-          status: backendRes.status,
-          detail: textBody,
-        },
-        { status: 500 },
-      )
+      console.error("[frontend] backend error:", backendRes.status, textBody)
+      // Trả đúng status backend (401 thì frontend cũng 401)
+      return new NextResponse(textBody, {
+        status: backendRes.status,
+        headers: { "Content-Type": "application/json" },
+      })
     }
 
     const parsed = JSON.parse(textBody) as {
       gesture: string
       confidence: number
+      text?: string
+      has_hand?: boolean
     }
 
     const gesture = parsed.gesture
     const confidence = parsed.confidence
-    const text = GESTURE_TEXTS[gesture] ?? `Cử chỉ ${gesture}`
+    const text =
+      parsed.text ?? GESTURE_TEXTS[gesture] ?? `Cử chỉ ${gesture}`
 
     return NextResponse.json({
-      gesture,
-      confidence,
+      ...parsed,
       text,
-      timestamp: new Date().toISOString(),
     })
   } catch (err) {
     console.error("[frontend] route /api/gesture/predict-base64 error:", err)

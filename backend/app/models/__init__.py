@@ -1,11 +1,14 @@
 from .user import User
-from .gesture_sample import GestureSample
-from .prediction_log import PredictionLog
-from .caregiver_relation import CaregiverRelation
+from .gesture_samples import GestureSample
+from .prediction_logs import PredictionLog
+from .caregiver_relations import CaregiverRelation
+from .gesture_mapping import GestureDictionary, UserGestureMapping
 
 __all__ = [
     "User",
     "GestureSample",
     "PredictionLog",
     "CaregiverRelation",
+    "GestureDictionary",
+    "UserGestureMapping",
 ]

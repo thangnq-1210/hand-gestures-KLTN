@@ -78,3 +78,62 @@ export async function apiGetMe(token: string): Promise<User> {
 
   return res.json();
 }
+
+export interface GestureMappingEffective {
+  model_label: string
+  default_text: string
+  custom_text: string | null
+  effective_text: string
+}
+
+export async function apiGetMyGestureMapping(token: string): Promise<GestureMappingEffective[]> {
+  const res = await fetch(`${API_BASE_URL}/gestures/my-mapping`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || "Không load được gesture mapping")
+  }
+
+  return res.json()
+}
+
+export async function apiUpsertMyGestureMapping(
+  token: string,
+  modelLabel: string,
+  customText: string,
+): Promise<GestureMappingEffective> {
+  const res = await fetch(`${API_BASE_URL}/gestures/my-mapping/${modelLabel}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ custom_text: customText }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || "Không cập nhật được mapping")
+  }
+
+  return res.json()
+}
+
+export async function apiDeleteMyGestureMapping(token: string, modelLabel: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/gestures/my-mapping/${modelLabel}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || "Không xoá được mapping")
+  }
+}
+

@@ -11,11 +11,13 @@ from .api.collect import router as collect_router
 from .api.tts import router as tts_router
 from .api.auth import router as auth_router
 
-# Tạo bảng nếu chưa có (dựa trên các model đã import)
+from .api.gesture_predict import router as gesture_predict_router
+from .api.gesture import router as gesture_mapping_router
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Hand Gesture API Documentation",
+    title="V-HAND API Documentation",
     version="1.0.0",
 )
 
@@ -36,6 +38,8 @@ def db_test(db: Session = Depends(get_db)):
 
 # gắn các router
 app.include_router(auth_router)
+app.include_router(gesture_predict_router)
+app.include_router(gesture_mapping_router)
 app.include_router(gesture_router)
 app.include_router(collect_router)
 app.include_router(tts_router)

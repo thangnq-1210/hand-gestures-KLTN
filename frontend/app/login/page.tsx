@@ -40,7 +40,7 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background to-secondary/10">
       <Card className="w-full max-w-md border-2 border-primary/20">
         <div className="p-8">
-          <h1 className="text-3xl font-bold text-primary mb-2 text-center">Đăng Nhập</h1>
+          <h1 className="text-3xl font-bold text-teal-500 mb-2 text-center">Đăng nhập</h1>
           {/* <p className="text-muted-foreground text-center mb-6">Đăng nhập để sử dụng hệ thống nhận diện cử chỉ</p> */}
 
           {error && (
@@ -76,19 +76,19 @@ export default function LoginPage() {
             </div>
 
             <div className="flex justify-end">
-              <Link href="/forgot-password" className="text-sm text-primary hover:underline">
+              <Link href="/forgot-password" className="text-sm text-teal-500 hover:underline">
                 Quên mật khẩu?
               </Link>
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full bg-teal-500 hover:bg-teal-600" disabled={isLoading}>
               {isLoading ? "Đang đăng nhập..." : "Đăng Nhập"}
             </Button>
           </form>
 
           <div className="mt-6 text-center text-sm text-muted-foreground">
             Chưa có tài khoản?{" "}
-            <Link href="/register" className="text-primary hover:underline">
+            <Link href="/register" className="text-teal-500 hover:underline">
               Đăng ký tại đây
             </Link>
           </div>

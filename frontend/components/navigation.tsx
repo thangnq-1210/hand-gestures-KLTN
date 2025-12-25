@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { LogOut, Settings, Home, BarChart3, Lock, BookOpen, Menu } from "lucide-react"
+import { LogOut, Settings, Home, BarChart3, Hand, Lock, BookOpen, Menu, Contact  } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,9 +21,9 @@ export default function Navigation() {
   const userMenuItems = [
     { href: "/gestures", label: "Quản Lý Cử Chỉ", icon: BookOpen },
     { href: "/statistics", label: "Thống Kê", icon: BarChart3 },
-    { href: "/settings", label: "Tiếp Cận", icon: Settings },
+    { href: "/settings", label: "Cài Đặt Hệ Thống", icon: Settings },
     { href: "/privacy", label: "Quyền Riêng Tư", icon: Lock },
-    { href: "/profile", label: "Hồ Sơ Cá Nhân", icon: Settings },
+    { href: "/profile", label: "Hồ Sơ Cá Nhân", icon: Contact },
   ]
 
   const caregiverMenuItems = [
@@ -61,22 +61,29 @@ export default function Navigation() {
           {isAuthenticated && user ? (
             <>
               <Link href="/">
-                <Button variant="ghost" size="sm" className="gap-2">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
                   <Home className="w-4 h-4" />
-                  Nhận Diện
+                  Trang chủ
+                </Button>
+              </Link>
+
+              <Link href="/gesture-recognition">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <Hand className="w-4 h-4 mr-2" />
+                  Nhận diện
                 </Button>
               </Link>
 
               <Link href="/statistics">
-                <Button variant="ghost" size="sm">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
                   <BarChart3 className="w-4 h-4 mr-2" />
-                  Thống Kê
+                  Thống kê
                 </Button>
               </Link>
 
               {user.role === "caregiver" && (
                 <Link href="/caregiver">
-                  <Button variant="ghost" size="sm" className="text-accent">
+                  <Button variant="ghost" size="sm" className="text-accent hover:bg-teal-600">
                     Điều Khiển
                   </Button>
                 </Link>
@@ -84,9 +91,11 @@ export default function Navigation() {
 
               {user.role === "admin" && (
                 <Link href="/admin">
-                  <Button variant="ghost" size="sm" className="text-accent">
-                    Quản Trị
+                  <Button variant="ghost" size="sm" className="text-accent hover:bg-teal-600">
+                    <Settings className="w-4 h-4 mr-2" />
+                    Quản trị
                   </Button>
+                  
                 </Link>
               )}
             </>
@@ -99,7 +108,7 @@ export default function Navigation() {
             <>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-2 border border-transparent hover:border-transparent">
+                  <Button variant="ghost" size="sm" className="gap-2 border border-transparent hover:bg-teal-600">
                     {user.name}
                   </Button>
                 </DropdownMenuTrigger>
@@ -166,12 +175,12 @@ export default function Navigation() {
           ) : (
             <>
               <Link href="/login">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="hover:bg-teal-600">
                   Đăng Nhập
                 </Button>
               </Link>
               <Link href="/register" className="hidden sm:block">
-                <Button size="sm">Đăng Ký</Button>
+                <Button size="sm" className="bg-teal-500 hover:bg-teal-600">Đăng Ký</Button>
               </Link>
             </>
           )}

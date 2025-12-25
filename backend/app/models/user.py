@@ -38,4 +38,25 @@ class User(Base):
     gesture_samples = relationship("GestureSample", back_populates="user", lazy="selectin")
     prediction_logs = relationship("PredictionLog", back_populates="user", lazy="selectin")
 
+    gesture_mappings = relationship(
+        "UserGestureMapping",
+        back_populates="user",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+    caregiver_relations_as_caregiver = relationship(
+        "CaregiverRelation",
+        back_populates="caregiver",
+        foreign_keys="CaregiverRelation.caregiver_id",
+        cascade="all, delete-orphan"
+    )
+
+    caregiver_relations_as_patient = relationship(
+        "CaregiverRelation",
+        back_populates="patient",
+        foreign_keys="CaregiverRelation.patient_id",
+        cascade="all, delete-orphan"
+    )
+
 

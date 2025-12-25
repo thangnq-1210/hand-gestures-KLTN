@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
+from fastapi.security import OAuth2PasswordRequestForm
 from ..db import get_db
 from .. import models
 from ..schemas.user import UserCreate, UserLogin, UserOut
@@ -65,4 +65,48 @@ def login(user_in: UserLogin, db: Session = Depends(get_db)):
             "name": user.name,
             "role": user.role,
         },
+    }
+
+def authenticate_user(db: Session, email: str, password: str) -> models.User | None:
+    """
+    Dùng chung cho /auth/login (JSON) và /auth/token (form).
+    """
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    return user
+
+@router.post("/token")
+def login_for_swagger(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint dành cho OAuth2 password flow (Swagger UI).
+
+    Swagger sẽ gửi:
+    - username: bạn dùng như email
+    - password: mật khẩu
+    Dữ liệu là form (x-www-form-urlencoded), KHÔNG PHẢI JSON.
+    """
+    # form_data.username = email
+    user = authenticate_user(db, email=form_data.username, password=form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect email or password",
+        )
+
+    access_token = create_access_token(
+        {
+            "sub": str(user.id),
+            "email": user.email,
+            "role": user.role,
+        }
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
     }

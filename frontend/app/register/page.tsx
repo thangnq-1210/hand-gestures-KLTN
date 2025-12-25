@@ -56,7 +56,7 @@ export default function RegisterPage() {
     <main className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background to-secondary/10">
       <Card className="w-full max-w-md border-2 border-primary/20">
         <div className="p-8">
-          <h1 className="text-3xl font-bold text-primary mb-2 text-center">Đăng Ký</h1>
+          <h1 className="text-3xl font-bold text-teal-500 mb-2 text-center">Đăng ký</h1>
           <p className="text-muted-foreground text-center mb-6">Tạo tài khoản để bắt đầu sử dụng</p>
 
           {error && (
@@ -115,14 +115,14 @@ export default function RegisterPage() {
               />
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full bg-teal-500 hover:bg-teal-600" disabled={isLoading}>
               {isLoading ? "Đang đăng ký..." : "Đăng Ký"}
             </Button>
           </form>
 
           <div className="mt-6 text-center text-sm text-muted-foreground">
             Đã có tài khoản?{" "}
-            <Link href="/login" className="text-primary hover:underline">
+            <Link href="/login" className="text-teal-500 hover:underline">
               Đăng nhập tại đây
             </Link>
           </div>

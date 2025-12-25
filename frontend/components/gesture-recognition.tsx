@@ -3,13 +3,17 @@
 import { useRef, useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { AlertCircle, CheckCircle2, Info, Camera, Lock } from "lucide-react"
+import { AlertCircle, CheckCircle2, Info, Camera, Lock, X, Upload } from "lucide-react"
 import TextToSpeech from "./text-to-speech"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useAuth } from "@/lib/auth-context"
+import { Badge } from "@/components/ui/badge"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
 interface GestureRecognitionProps {
   onGestureDetected: (gesture: string, text: string, confidence: number) => void
@@ -25,7 +29,31 @@ type RecognitionStatus =
   | "permission_denied"
   | "not_supported"
 
+type CollectionMethod = "none" | "image" | "camera"
+
+interface GestureMapping {
+  model_label: string
+  default_text: string
+  custom_text?: string | null
+  effective_text: string
+}
+
+type UploadPredictResult = {
+  gesture: string
+  confidence: number
+  text: string
+  has_hand: boolean
+}
+
+type SampleRow = { label: string | number }
+
 export default function GestureRecognition({ onGestureDetected }: GestureRecognitionProps) {
+  // const { token, isAuthenticated } = useAuth()
+  const { token, isAuthenticated, user } = useAuth()
+  const [gestureMappings, setGestureMappings] = useState<GestureMapping[] | null>(null)
+  const [mappingError, setMappingError] = useState<string | null>(null)
+  const [isMappingLoading, setIsMappingLoading] = useState(false)
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -34,6 +62,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     text: string
     confidence: number
   } | null>(null)
+
   const [isStreamActive, setIsStreamActive] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
 
@@ -45,13 +74,61 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
   const [collectedSamples, setCollectedSamples] = useState<{ [key: string]: number }>({})
   const [recognitionStatus, setRecognitionStatus] = useState<RecognitionStatus>("idle")
 
-  // trạng thái & timer cho thông báo + đọc sau 5s
+  // trạng thái & timer cho thông báo + đọc sau 3s
   const [pendingSpeech, setPendingSpeech] = useState(false)
   const speechTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSpokenGestureRef = useRef<string | null>(null)
-  // dem nguoc
   const [countdown, setCountdown] = useState<number | null>(null)
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // ====== DATA COLLECTION UI STATES ======
+  const [collectionMethod, setCollectionMethod] = useState<CollectionMethod>("none")
+
+  // Upload image states
+  const [uploadDataUrl, setUploadDataUrl] = useState<string | null>(null)
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isSavingUpload, setIsSavingUpload] = useState(false)
+
+  // upload -> recognize -> then save
+  const [isUploadPredicting, setIsUploadPredicting] = useState(false)
+  const [uploadPredictResult, setUploadPredictResult] = useState<UploadPredictResult | null>(null)
+
+  // size limit (10MB)
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const clearUploadedImage = useCallback(() => {
+    setUploadDataUrl(null)
+    setUploadFileName(null)
+    setUploadError(null)
+    setUploadPredictResult(null)
+
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }, [])
+
+  // ====== SAVE NOTICE (after saving sample) ======
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  const saveNoticeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const showSaveNotice = useCallback((msg: string) => {
+    setSaveNotice(msg)
+    if (saveNoticeTimeoutRef.current) clearTimeout(saveNoticeTimeoutRef.current)
+    saveNoticeTimeoutRef.current = setTimeout(() => setSaveNotice(null), 10000)
+  }, [])
+
+  // ====== CAMERA COLLECT (batch + progress) ======
+  const [collectBatchSize, setCollectBatchSize] = useState<1 | 5 | 10>(5)
+  const [isCollecting, setIsCollecting] = useState(false)
+  const [collectError, setCollectError] = useState<string | null>(null)
+  const [collectProgress, setCollectProgress] = useState<{ saved: number; tried: number } | null>(null)
+
+  const [canSaveCamera, setCanSaveCamera] = useState(false)
+  const [cameraFrameForSave, setCameraFrameForSave] = useState<string | null>(null)
+  const [handHint, setHandHint] = useState<string>("Chưa kiểm tra")
+
+  // const [samplesPerSave, setSamplesPerSave] = useState(5)
+  // const [isBurstSaving, setIsBurstSaving] = useState(false)
 
   // Gọi API TTS backend để phát tiếng Việt chuẩn
   const playServerTTS = useCallback(async (text: string) => {
@@ -73,9 +150,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
 
-      audio.onended = () => {
-        URL.revokeObjectURL(url)
-      }
+      audio.onended = () => URL.revokeObjectURL(url)
       audio.onerror = (e) => {
         console.error("Error playing TTS audio:", e)
         URL.revokeObjectURL(url)
@@ -87,8 +162,8 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     }
   }, [])
 
-
-  const defaultGestures = [
+  // fallback khi chưa lấy được từ backend
+  const fallbackGestures = [
     { id: "0", name: "Cử chỉ 0", text: "Xin chào" },
     { id: "1", name: "Cử chỉ 1", text: "Tôi cần giúp đỡ" },
     { id: "2", name: "Cử chỉ 2", text: "Vâng" },
@@ -97,17 +172,263 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     { id: "5", name: "Cử chỉ 5", text: "Tôi đang đau" },
   ]
 
+  const gestureList = gestureMappings
+    ? gestureMappings.map((m) => ({
+      id: m.model_label,
+      name: `Cử chỉ ${m.model_label}`,
+      text: m.effective_text,
+    }))
+    : fallbackGestures
+
+  const selectedGestureObj = gestureList.find((g) => g.id === selectedGestureForCollection)
+
+  // tải mapping cử chỉ từ backend (đã tuỳ chỉnh theo user)
+  useEffect(() => {
+    if (!token || !isAuthenticated) return
+
+    const fetchMapping = async () => {
+      try {
+        setIsMappingLoading(true)
+        setMappingError(null)
+
+        const res = await fetch(`${API_BASE_URL}/gestures/my-mapping`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(text || "Không tải được mapping cử chỉ")
+        }
+
+        const data: GestureMapping[] = await res.json()
+        setGestureMappings(data)
+      } catch (err) {
+        console.error("Load gesture mapping error:", err)
+        setMappingError("Không tải được dữ liệu cử chỉ, đang dùng cấu hình mặc định.")
+      } finally {
+        setIsMappingLoading(false)
+      }
+    }
+
+    void fetchMapping()
+  }, [token, isAuthenticated])
+
   // dọn dẹp timer khi unmount
   useEffect(() => {
     return () => {
-      if (speechTimeoutRef.current) {
-        clearTimeout(speechTimeoutRef.current)
-      }
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current)
-      }
+      if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+      if (saveNoticeTimeoutRef.current) clearTimeout(saveNoticeTimeoutRef.current)
     }
   }, [])
+
+  // Load sample counts from server (optional but recommended)
+  // const refreshSampleCounts = useCallback(async () => {
+  //   if (!token || !isAuthenticated) return
+  //   try {
+  //     const res = await fetch("/api/collect/my-sample-counts", {
+  //       headers: { Authorization: `Bearer ${token}` },
+  //     })
+  //     if (!res.ok) return
+
+  //     const rows = (await res.json()) as Array<{ label: string; count: number }>
+  //     const map: Record<string, number> = {}
+  //     for (const r of rows) map[r.label] = r.count
+  //     setCollectedSamples(map)
+  //   } catch (e) {
+  //     console.error("refreshSampleCounts error:", e)
+  //   }
+  // }, [token, isAuthenticated])
+  const refreshSampleCounts = useCallback(async () => {
+    if (!isAuthenticated || !token || !user?.id) return
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/collect/my-samples?user_id=${user.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return
+
+      const rows = (await res.json()) as SampleRow[]
+      const map: Record<string, number> = {}
+
+      for (const r of rows) {
+        const k = String(r.label)
+        map[k] = (map[k] || 0) + 1
+      }
+
+      setCollectedSamples(map)
+    } catch (e) {
+      console.error("refreshSampleCounts error:", e)
+    }
+  }, [API_BASE_URL, isAuthenticated, token, user?.id])
+
+  useEffect(() => {
+    if (dataCollectionMode) void refreshSampleCounts()
+  }, [dataCollectionMode, refreshSampleCounts])
+
+  const captureAndPredict = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current) return
+    if (!isAuthenticated || !token) {
+      setRecognitionStatus("idle")
+      setCurrentResult({
+        gesture: "-",
+        text: "Vui lòng đăng nhập để sử dụng nhận diện cử chỉ",
+        confidence: 0,
+      })
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      setRecognitionStatus("detecting")
+
+      const ctx = canvasRef.current.getContext("2d")
+      if (!ctx) return
+
+      canvasRef.current.width = videoRef.current.videoWidth
+      canvasRef.current.height = videoRef.current.videoHeight
+      ctx.drawImage(videoRef.current, 0, 0)
+
+      const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
+
+      const response = await fetch("/api/gesture/predict-base64", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ image: base64Image }),
+      })
+
+      if (!response.ok) {
+        const msg = await response.text()
+        console.error("API /api/gesture/predict-base64 error:", response.status, msg)
+        throw new Error("API request failed")
+      }
+
+      const data = await response.json()
+      console.log("🔥 API data:", data)
+
+      const { gesture, confidence, text, has_hand } = data as {
+        gesture: string
+        confidence: number
+        text: string
+        has_hand: boolean
+      }
+
+      // 1) Không có tay
+      if (has_hand === false || gesture === "no_hand") {
+        setRecognitionStatus("no_hand")
+        setCurrentResult({
+          gesture: "-",
+          text: "Vui lòng giơ tay vào camera",
+          confidence: 0,
+        })
+
+        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+        setPendingSpeech(false)
+
+        if (!oneTabMode && !dataCollectionMode) {
+          setTimeout(() => void captureAndPredict(), 1500)
+        }
+        return
+      }
+
+      // 2) Có tay nhưng độ tin cậy thấp
+      if (confidence < confidenceThreshold) {
+        setRecognitionStatus("no_hand")
+        setCurrentResult({
+          gesture: "Không chắc chắn",
+          text: "Độ tin cậy thấp, hãy giữ tay rõ trong khung hình",
+          confidence: confidence || 0,
+        })
+
+        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+        setPendingSpeech(false)
+        setCountdown(null)
+        lastSpokenGestureRef.current = null
+
+        if (!oneTabMode && !dataCollectionMode) {
+          setTimeout(() => void captureAndPredict(), 1500)
+        }
+        return
+      }
+
+      // 3) Nhận diện OK
+      const effectiveGesture = gesture || "Unknown"
+      const effectiveText = text || "Không xác định"
+      const effectiveConf = confidence || 0
+
+      setRecognitionStatus("high_confidence")
+      setCurrentResult({
+        gesture: effectiveGesture,
+        text: effectiveText,
+        confidence: effectiveConf,
+      })
+      onGestureDetected(effectiveGesture, effectiveText, effectiveConf)
+
+      // Auto speak (nếu bật)
+      if (autoSpeak && !pendingSpeech) {
+        const TOTAL_SECONDS = 3
+
+        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+
+        setPendingSpeech(true)
+        setCountdown(TOTAL_SECONDS)
+
+        countdownIntervalRef.current = setInterval(() => {
+          setCountdown((prev) => {
+            if (prev === null) return null
+            if (prev <= 1) {
+              if (countdownIntervalRef.current) {
+                clearInterval(countdownIntervalRef.current)
+                countdownIntervalRef.current = null
+              }
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
+
+        speechTimeoutRef.current = setTimeout(() => {
+          setPendingSpeech(false)
+          setCountdown(null)
+          void playServerTTS(effectiveText)
+        }, TOTAL_SECONDS * 1000)
+      } else if (!autoSpeak) {
+        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+        setPendingSpeech(false)
+        setCountdown(null)
+      }
+    } catch (error) {
+      console.error("Prediction error:", error)
+      setRecognitionStatus("no_hand")
+      setCurrentResult({
+        gesture: "Lỗi",
+        text: "Lỗi khi xử lý. Vui lòng thử lại.",
+        confidence: 0,
+      })
+
+      if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+      setPendingSpeech(false)
+
+      if (!oneTabMode && !dataCollectionMode) {
+        setTimeout(() => void captureAndPredict(), 2000)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }, [
+    isAuthenticated,
+    token,
+    onGestureDetected,
+    confidenceThreshold,
+    autoSpeak,
+    oneTabMode,
+    pendingSpeech,
+    playServerTTS,
+    dataCollectionMode,
+  ])
 
   const initializeCamera = useCallback(async () => {
     try {
@@ -127,6 +448,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
         videoRef.current.srcObject = stream
         setIsStreamActive(true)
         setRecognitionStatus("ready")
+        setTimeout(() => void captureAndPredict(), 500)
       }
     } catch (error: unknown) {
       setIsStreamActive(false)
@@ -150,10 +472,9 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       console.error("[v0] Camera initialization error:", error)
       setCameraError(errorMessage)
     }
-  }, [])
+  }, [captureAndPredict])
 
   const stopCamera = useCallback(() => {
-    // Dừng stream nếu đang bật
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream
       stream.getTracks().forEach((track) => track.stop())
@@ -162,11 +483,8 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
     setIsStreamActive(false)
     setRecognitionStatus("idle")
-
-    // Xoá kết quả hiện tại (tuỳ bạn, có thể giữ lại nếu muốn)
     setCurrentResult(null)
 
-    // Huỷ các timer đếm ngược / auto speak
     if (speechTimeoutRef.current) {
       clearTimeout(speechTimeoutRef.current)
       speechTimeoutRef.current = null
@@ -179,214 +497,509 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     setCountdown(null)
   }, [])
 
-  const captureAndPredict = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current) return
-
-    try {
-      setIsLoading(true)
-      setRecognitionStatus("detecting")
-
-      const ctx = canvasRef.current.getContext("2d")
-      if (!ctx) return
-
-      canvasRef.current.width = videoRef.current.videoWidth
-      canvasRef.current.height = videoRef.current.videoHeight
-      ctx.drawImage(videoRef.current, 0, 0)
-
-      const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
-
-      const response = await fetch("/api/gesture/predict-base64", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: base64Image }),
-      })
-
-      if (!response.ok) {
-        const msg = await response.text()
-        console.error("API /api/gesture/predict-base64 error:", response.status, msg)
-        throw new Error("API request failed")
-      }
-
-      const data = await response.json()
-      // 👇 thêm has_hand ở đây (backend phải trả về)
-      const { gesture, confidence, text, has_hand } = data
-
-      // 1) Không có tay trong khung -> hiện đúng câu bạn muốn
-      if (has_hand === false || gesture === "no_hand") {
-        setRecognitionStatus("no_hand")
-        setCurrentResult({
-          gesture: "-",                               // không hiển thị lớp
-          text: "Vui lòng giơ tay vào camera",        // 👈 thông báo
-          confidence: 0,                              // thanh % = 0
-        })
-
-        // tắt mọi hẹn giờ đọc, tắt thông báo
-        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
-        setPendingSpeech(false)
-        return
-      }
-
-      // 2) Có tay nhưng độ tin cậy thấp
-      if (confidence < confidenceThreshold) {
-        setRecognitionStatus("no_hand")
-        setCurrentResult({
-          gesture: "Không chắc chắn",
-          text: "Độ tin cậy thấp, hãy giữ tay rõ trong khung hình",
-          confidence: confidence || 0,
-        })
-
-        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
-        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
-        setPendingSpeech(false)
-        setCountdown(null)
-        lastSpokenGestureRef.current = null
-      } else {
-        // nhận diện thành công
-        const effectiveGesture = gesture || "Unknown"
-        const effectiveText = text || "Không xác định"
-        const effectiveConf = confidence || 0
-
-        setRecognitionStatus("high_confidence")
-        setCurrentResult({
-          gesture: effectiveGesture,
-          text: effectiveText,
-          confidence: effectiveConf,
-        })
-        onGestureDetected(effectiveGesture, effectiveText, effectiveConf)
-
-        // 🔊 Đọc tự động sau 3s nếu autoSpeak bật
-        if (autoSpeak && !pendingSpeech) {
-          const TOTAL_SECONDS = 3
-
-          // huỷ timer cũ nếu có
-          if (speechTimeoutRef.current) {
-            clearTimeout(speechTimeoutRef.current)
-          }
-          if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current)
-          }
-
-          // bật thông báo giữ tay + set countdown
-          setPendingSpeech(true)
-          setCountdown(TOTAL_SECONDS)
-
-          // interval đếm ngược mỗi 1 giây
-          countdownIntervalRef.current = setInterval(() => {
-            setCountdown((prev) => {
-              if (prev === null) return null
-              if (prev <= 1) {
-                // tới 0 thì dừng đếm
-                if (countdownIntervalRef.current) {
-                  clearInterval(countdownIntervalRef.current)
-                  countdownIntervalRef.current = null
-                }
-                return 0
-              }
-              return prev - 1
-            })
-          }, 1000)
-
-          // sau 3 giây thì phát âm
-          speechTimeoutRef.current = setTimeout(() => {
-            setPendingSpeech(false)
-            setCountdown(null)
-
-            // dùng TTS từ server, không dùng speechSynthesis nữa
-            void playServerTTS(effectiveText)
-          }, TOTAL_SECONDS * 1000)
-        } else if (!autoSpeak) {
-          // tắt autoSpeak → huỷ timer và reset
-          if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
-          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
-          setPendingSpeech(false)
-          setCountdown(null)
-        }
-
-        if (oneTabMode && confidence >= confidenceThreshold) {
-          console.log("[v0] One-tap mode enabled, gesture processed automatically")
-        }
-      }
-
-    } catch (error) {
-      console.error("Prediction error:", error)
-      setRecognitionStatus("no_hand")
-      setCurrentResult({
-        gesture: "Lỗi",
-        text: "Lỗi khi xử lý. Vui lòng thử lại.",
-        confidence: 0,
-      })
-
-      if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
-      setPendingSpeech(false)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [onGestureDetected, confidenceThreshold, autoSpeak, oneTabMode, pendingSpeech, playServerTTS])
-
   const handlePrimaryButtonClick = useCallback(() => {
-    if (recognitionStatus === "high_confidence") {
-      // Vừa nhận diện xong, giờ muốn nhận tiếp cử chỉ khác:
-      // reset trạng thái về "ready", xoá kết quả cũ, huỷ timer
-      setRecognitionStatus("ready")
-      setCurrentResult(null)
-
-      if (speechTimeoutRef.current) {
-        clearTimeout(speechTimeoutRef.current)
-        speechTimeoutRef.current = null
-      }
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current)
-        countdownIntervalRef.current = null
-      }
-
-      setPendingSpeech(false)
-      setCountdown(null)
-    } else {
-      void captureAndPredict()
+    if (!isStreamActive || !videoRef.current || !canvasRef.current) {
+      console.warn("Không thể nhận diện: camera chưa sẵn sàng")
+      return
     }
-  }, [recognitionStatus, captureAndPredict])
+
+    if (speechTimeoutRef.current) {
+      clearTimeout(speechTimeoutRef.current)
+      speechTimeoutRef.current = null
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+
+    setPendingSpeech(false)
+    setCountdown(null)
+
+    if (recognitionStatus === "high_confidence") {
+      setCurrentResult(null)
+    }
+
+    void captureAndPredict()
+  }, [isStreamActive, recognitionStatus, captureAndPredict])
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null
 
-    // 👇 khi đang đếm ngược (pendingSpeech = true) thì TẠM DỪNG auto nhận diện
-    if (isStreamActive && !dataCollectionMode && !pendingSpeech && recognitionStatus !== "high_confidence") {
-      interval = setInterval(() => {
-        captureAndPredict()
-      }, 2000)
+    if (isStreamActive && oneTabMode && !dataCollectionMode && !pendingSpeech && isAuthenticated && token) {
+      interval = setInterval(() => void captureAndPredict(), 2000)
     }
 
     return () => {
       if (interval) clearInterval(interval)
     }
-  }, [isStreamActive, captureAndPredict, dataCollectionMode, pendingSpeech, recognitionStatus])
+  }, [isStreamActive, oneTabMode, dataCollectionMode, pendingSpeech, isAuthenticated, token, captureAndPredict])
 
-  const handleCollectSample = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current) return
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  const captureFrameBase64 = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return null
+
+    const vw = videoRef.current.videoWidth
+    const vh = videoRef.current.videoHeight
+    if (!vw || !vh) return null
 
     const ctx = canvasRef.current.getContext("2d")
-    if (!ctx) return
+    if (!ctx) return null
 
-    canvasRef.current.width = videoRef.current.videoWidth
-    canvasRef.current.height = videoRef.current.videoHeight
+    canvasRef.current.width = vw
+    canvasRef.current.height = vh
     ctx.drawImage(videoRef.current, 0, 0)
 
-    const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
+    return canvasRef.current.toDataURL("image/jpeg", 0.9)
+  }, [])
 
-    setCollectedSamples((prev) => ({
-      ...prev,
-      [selectedGestureForCollection]: (prev[selectedGestureForCollection] || 0) + 1,
-    }))
 
-    localStorage.setItem(
-      `gesture_samples_${selectedGestureForCollection}`,
-      JSON.stringify({
-        count: (collectedSamples[selectedGestureForCollection] || 0) + 1,
-        samples: [base64Image],
-        timestamp: new Date(),
-      }),
-    )
-  }, [selectedGestureForCollection, collectedSamples])
+  const qualityCheck = useCallback(async (imageBase64: string) => {
+    const res = await fetch(`${API_BASE_URL}/gesture/predict-base64`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ image: imageBase64 }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    return data
+  }, [API_BASE_URL, token])
+
+
+  const saveSampleFromCamera = useCallback(
+    async (label: string, imageBase64: string) => {
+      if (!user?.id) throw new Error("Missing user_id")
+
+      const res = await fetch(`${API_BASE_URL}/collect/sample-base64`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // backend hiện chưa check token, nhưng để vẫn ok
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          user_id: String(user.id),
+          label: String(label),
+          image_base64: imageBase64,
+        }),
+      })
+
+      if (!res.ok) throw new Error(await res.text())
+      return await res.json()
+    },
+    [API_BASE_URL, token, user?.id]
+  )
+
+  useEffect(() => {
+    // chỉ chạy khi: đang bật thu thập + chọn camera + camera đang bật
+    if (!dataCollectionMode || collectionMethod !== "camera" || !isStreamActive) {
+      setCanSaveCamera(false)
+      setCameraFrameForSave(null)
+      setHandHint("Chưa bật camera/thu thập")
+      return
+    }
+
+    if (!isAuthenticated || !token) {
+      setCanSaveCamera(false)
+      setCameraFrameForSave(null)
+      setHandHint("Cần đăng nhập")
+      return
+    }
+
+    let alive = true
+
+    const tick = async () => {
+      const frame = captureFrameBase64()
+      if (!frame) {
+        if (!alive) return
+        setCanSaveCamera(false)
+        setHandHint("Đang chờ camera sẵn sàng...")
+        return
+      }
+
+      try {
+        // dùng đúng endpoint predict bạn đang dùng cho upload
+        const res = await fetch(`${API_BASE_URL}/gesture/predict-base64`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ image: frame }),
+        })
+
+        if (!res.ok) {
+          if (!alive) return
+          setCanSaveCamera(false)
+          setHandHint("Không kiểm tra được tay (API lỗi)")
+          return
+        }
+
+        const data = (await res.json()) as { has_hand: boolean; gesture: string }
+
+        if (!alive) return
+
+        // const hasHand = data.has_hand !== false && data.gesture !== "no_hand"
+        const hasHand = data.has_hand === true
+
+        setCanSaveCamera(hasHand)
+        setHandHint(hasHand ? "Đang thấy tay – có thể lưu" : "⚠️ Chưa thấy tay rõ")
+
+        if (hasHand) setCameraFrameForSave(frame)
+      } catch (e) {
+        console.error(e)
+        if (!alive) return
+        setCanSaveCamera(false)
+        setHandHint("Lỗi khi kiểm tra tay")
+      }
+    }
+
+    // chạy ngay và lặp
+    tick()
+    const id = setInterval(tick, 1200)
+
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [
+    dataCollectionMode,
+    collectionMethod,
+    isStreamActive,
+    isAuthenticated,
+    token,
+    API_BASE_URL,
+    captureFrameBase64,
+  ])
+
+
+  // ====== COLLECT FROM CAMERA (SAVE DIRECTLY) ======
+  // const handleCollectSample = useCallback(async () => {
+  //   if (!isAuthenticated || !token) {
+  //     setCurrentResult({
+  //       gesture: "-",
+  //       text: "Vui lòng đăng nhập để thu thập dữ liệu",
+  //       confidence: 0,
+  //     })
+  //     return
+  //   }
+
+  //   if (!user?.id) {
+  //     setCurrentResult({ gesture: "Lỗi", text: "Thiếu user_id", confidence: 0 })
+  //     return
+  //   }
+
+  //   if (!videoRef.current || !canvasRef.current) return
+
+  //   // ✅ đảm bảo video đã có kích thước thật
+  //   const vw = videoRef.current.videoWidth
+  //   const vh = videoRef.current.videoHeight
+  //   if (!vw || !vh) {
+  //     setCurrentResult({ gesture: "Lỗi", text: "Camera chưa sẵn sàng (videoWidth=0). Đợi 1-2s rồi thử lại.", confidence: 0 })
+  //     return
+  //   }
+
+  //   const ctx = canvasRef.current.getContext("2d")
+  //   if (!ctx) return
+
+  //   canvasRef.current.width = vw
+  //   canvasRef.current.height = vh
+  //   ctx.drawImage(videoRef.current, 0, 0)
+
+  //   const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
+
+  //   try {
+  //     const res = await fetch(`${API_BASE_URL ?? "http://127.0.0.1:8000"}/collect/sample-base64`, {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //         Authorization: `Bearer ${token}`,
+  //       },
+  //       body: JSON.stringify({
+  //         user_id: String(user.id),
+  //         label: String(selectedGestureForCollection),
+  //         image_base64: base64Image,
+  //       }),
+  //     })
+
+  //     if (!res.ok) {
+  //       const msg = await res.text()
+  //       console.error("collect error:", res.status, msg)
+  //       setCurrentResult({ gesture: "Lỗi", text: "Không lưu được mẫu. " + msg, confidence: 0 })
+  //       return
+  //     }
+
+  //     // ✅ update UI count ngay
+  //     setCollectedSamples((prev) => ({
+  //       ...prev,
+  //       [selectedGestureForCollection]: (prev[selectedGestureForCollection] || 0) + 1,
+  //     }))
+
+  //     // ✅ thông báo đúng (không dùng uploadPredictResult)
+  //     showSaveNotice(`Đã lưu 1 mẫu cho cử chỉ ${selectedGestureForCollection}`)
+  //   } catch (e) {
+  //     console.error(e)
+  //     setCurrentResult({ gesture: "Lỗi", text: "Không lưu được mẫu. Vui lòng thử lại.", confidence: 0 })
+  //   }
+  // }, [
+  //   isAuthenticated,
+  //   token,
+  //   user?.id,
+  //   selectedGestureForCollection,
+  //   showSaveNotice,
+  //   API_BASE_URL,
+  // ])
+  // const handleCollectSample = useCallback(async () => {
+  //   if (!isAuthenticated || !token) return
+  //   if (!user?.id) {
+  //     showSaveNotice("Thiếu user_id")
+  //     return
+  //   }
+
+  //   // chỉ cho lưu khi hệ thống đang thấy tay
+  //   if (!canSaveCamera || !cameraFrameForSave) {
+  //     showSaveNotice("⚠️ Chưa thấy tay rõ trong khung hình nên chưa thể lưu.")
+  //     return
+  //   }
+
+  //   try {
+  //     const res = await fetch(`${API_BASE_URL}/collect/sample-base64`, {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //         Authorization: `Bearer ${token}`,
+  //       },
+  //       body: JSON.stringify({
+  //         user_id: String(user.id),
+  //         label: String(selectedGestureForCollection),
+  //         image_base64: cameraFrameForSave,
+  //       }),
+  //     })
+
+  //     if (!res.ok) throw new Error(await res.text())
+
+  //     setCollectedSamples((prev) => ({
+  //       ...prev,
+  //       [selectedGestureForCollection]: (prev[selectedGestureForCollection] || 0) + 1,
+  //     }))
+
+  //     showSaveNotice(`Đã lưu 1 mẫu cho cử chỉ ${selectedGestureForCollection}`)
+  //   } catch (e) {
+  //     console.error(e)
+  //     showSaveNotice("Lưu mẫu thất bại, vui lòng thử lại.")
+  //   }
+  // }, [
+  //   isAuthenticated,
+  //   token,
+  //   user?.id,
+  //   selectedGestureForCollection,
+  //   canSaveCamera,
+  //   cameraFrameForSave,
+  //   API_BASE_URL,
+  //   showSaveNotice,
+  // ])
+
+  const handleCollectSample = useCallback(async () => {
+    if (!isAuthenticated || !token) return
+    if (!user?.id) {
+      showSaveNotice("Thiếu user_id")
+      return
+    }
+    if (!isStreamActive) {
+      showSaveNotice("Camera chưa bật")
+      return
+    }
+    if (!canSaveCamera) {
+      showSaveNotice("Chưa thấy tay trong khung hình nên chưa thể lưu")
+      return
+    }
+
+    setIsCollecting(true)
+    setCollectProgress({ saved: 0, tried: 0 })
+
+    let ok = 0
+
+    try {
+      for (let i = 0; i < collectBatchSize; i++) {
+        const frame = captureFrameBase64()
+        if (!frame) {
+          setCollectProgress((p) => (p ? { ...p, tried: p.tried + 1 } : { saved: ok, tried: 1 }))
+          continue
+        }
+
+        const res = await fetch(`${API_BASE_URL}/collect/sample-base64`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            user_id: String(user.id),
+            label: String(selectedGestureForCollection),
+            image_base64: frame,
+          }),
+        })
+
+        if (res.ok) ok++
+
+        setCollectProgress((p) =>
+          p ? { saved: ok, tried: p.tried + 1 } : { saved: ok, tried: 1 }
+        )
+
+        await sleep(200) // để frame khác nhau
+      }
+
+      if (ok > 0) {
+        setCollectedSamples((prev) => ({
+          ...prev,
+          [selectedGestureForCollection]: (prev[selectedGestureForCollection] || 0) + ok,
+        }))
+      }
+
+      showSaveNotice(`Đã lưu ${ok}/${collectBatchSize} mẫu cho cử chỉ ${selectedGestureForCollection}`)
+    } catch (e) {
+      console.error(e)
+      showSaveNotice("Lưu mẫu thất bại")
+    } finally {
+      setIsCollecting(false)
+      setCollectProgress(null)
+    }
+  }, [
+    isAuthenticated,
+    token,
+    user?.id,
+    isStreamActive,
+    canSaveCamera,
+    collectBatchSize,
+    selectedGestureForCollection,
+    API_BASE_URL,
+    captureFrameBase64,
+    showSaveNotice,
+  ])
+
+
+  // ====== UPLOAD IMAGE FLOW: SELECT -> RECOGNIZE -> THEN SAVE ======
+  const handleUploadFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadError(null)
+    setUploadPredictResult(null)
+    setUploadFileName(file.name)
+
+    if (!file.type.startsWith("image/")) {
+      setUploadError("Vui lòng chọn đúng file ảnh.")
+      return
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError("Ảnh quá lớn. Giới hạn 10MB.")
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setUploadDataUrl(reader.result as string)
+    }
+    reader.onerror = () => setUploadError("Không đọc được file ảnh, vui lòng thử lại.")
+    reader.readAsDataURL(file)
+  }, [])
+
+  const handleRecognizeUploadedImage = useCallback(async () => {
+    if (!isAuthenticated || !token) {
+      setUploadError("Vui lòng đăng nhập để nhận diện.")
+      return
+    }
+    if (!uploadDataUrl) {
+      setUploadError("Bạn chưa chọn ảnh.")
+      return
+    }
+
+    try {
+      setIsUploadPredicting(true)
+      setUploadError(null)
+      setUploadPredictResult(null)
+
+      const res = await fetch(`${API_BASE_URL}/gesture/predict-base64`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ image: uploadDataUrl }),
+      })
+
+      if (!res.ok) throw new Error(await res.text())
+      const data = (await res.json()) as UploadPredictResult
+      setUploadPredictResult(data)
+
+      // (tuỳ chọn) auto set label theo kết quả nhận diện
+      if (data?.gesture && data.gesture !== "no_hand") {
+        setSelectedGestureForCollection(String(data.gesture))
+      }
+    } catch (e) {
+      console.error(e)
+      setUploadError("Không nhận diện được ảnh. Vui lòng thử lại.")
+    } finally {
+      setIsUploadPredicting(false)
+    }
+  }, [isAuthenticated, token, uploadDataUrl])
+
+
+  const canSaveUpload =
+    !!uploadPredictResult &&
+    uploadPredictResult.has_hand !== false &&
+    uploadPredictResult.gesture !== "no_hand"
+
+  const handleSaveUploadedSample = useCallback(async () => {
+    if (!isAuthenticated || !token) {
+      setUploadError("Vui lòng đăng nhập để thu thập dữ liệu.")
+      return
+    }
+    if (!user?.id) {
+      setUploadError("Thiếu user_id.")
+      return
+    }
+    if (!uploadDataUrl) {
+      setUploadError("Bạn chưa chọn ảnh.")
+      return
+    }
+    if (!uploadPredictResult) {
+      setUploadError('Hãy bấm "Nhận diện" trước khi quyết định lưu.')
+      return
+    }
+    if (uploadPredictResult.has_hand === false || uploadPredictResult.gesture === "no_hand") {
+      setUploadError("Ảnh này không thấy tay/không hợp lệ để lưu làm mẫu.")
+      return
+    }
+
+    try {
+      setIsSavingUpload(true)
+      setUploadError(null)
+
+      const res = await fetch(`${API_BASE_URL}/collect/sample-base64`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          user_id: String(user.id),
+          label: String(uploadPredictResult.gesture),
+          image_base64: uploadDataUrl,
+        }),
+      })
+
+      if (!res.ok) throw new Error(await res.text())
+
+      setCollectedSamples((prev) => ({
+        ...prev,
+        [String(uploadPredictResult.gesture)]: (prev[String(uploadPredictResult.gesture)] || 0) + 1,
+      }))
+      showSaveNotice(`Đã lưu mẫu cử chỉ nhãn ${uploadPredictResult!.gesture} thành công!`)
+      clearUploadedImage()
+    } catch (e) {
+      console.error(e)
+      setUploadError("Không lưu được mẫu từ ảnh. Vui lòng thử lại.")
+    } finally {
+      setIsSavingUpload(false)
+    }
+  }, [isAuthenticated, token, user?.id, uploadDataUrl, uploadPredictResult, clearUploadedImage])
+
 
   const getStatusIcon = () => {
     switch (recognitionStatus) {
@@ -433,7 +1046,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       {/* Camera Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-primary">Camera Nhận Diện</h2>
+          <h2 className="text-2xl font-bold text-teal-500">Camera nhận diện</h2>
           <div className="flex items-center gap-2 text-sm">
             {getStatusIcon()}
             <span className="text-muted-foreground">{getStatusText()}</span>
@@ -447,7 +1060,6 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
           </Alert>
         )}
 
-        {/* Video Feed */}
         <div className="relative w-full bg-black rounded-lg overflow-hidden border-2 border-primary/30">
           <video
             ref={videoRef}
@@ -467,13 +1079,12 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
           )}
         </div>
 
-        {/* Camera Controls */}
         <div className="flex gap-3 flex-wrap">
           {!isStreamActive ? (
             <Button
               onClick={initializeCamera}
               size="lg"
-              className="flex-1 bg-primary hover:bg-primary/90 text-white font-bold text-lg py-6"
+              className="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-bold text-lg py-6"
               disabled={cameraError !== null && recognitionStatus === "not_supported"}
             >
               <Camera className="w-5 h-5 mr-2" />
@@ -481,39 +1092,15 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
             </Button>
           ) : (
             <>
-              {/* <Button
-                onClick={captureAndPredict}
-                disabled={isLoading}
-                size="lg"
-                className="flex-1 bg-accent hover:bg-accent/90 text-white font-bold text-lg py-6"
-                aria-label={isLoading ? "Processing gesture..." : "Detect gesture"}
-              >
-                {isLoading ? "Đang xử lý..." : "Đang nhận diện..."}
-              </Button> */}
               <Button
                 onClick={handlePrimaryButtonClick}
-                disabled={isLoading}
+                disabled={isLoading || !isStreamActive}
                 size="lg"
                 className={`flex-1 font-bold text-lg py-6 text-white transition-colors
-                  ${recognitionStatus === "high_confidence"
-                    ? "bg-primary hover:bg-primary/90"       // 👉 giống nút Khởi động camera
-                    : "bg-accent hover:bg-accent/90"         // 👉 trạng thái bình thường
-                  }`}
-                aria-label={
-                  isLoading
-                    ? "Processing gesture..."
-                    : recognitionStatus === "high_confidence"
-                      ? "Continue detection"
-                      : "Detect gesture"
-                }
+                  ${recognitionStatus === "high_confidence" ? "bg-primary hover:bg-primary/90" : "bg-accent hover:bg-accent/90"}`}
               >
-                {isLoading
-                  ? "Đang xử lý..."
-                  : recognitionStatus === "high_confidence"
-                    ? "Tiếp tục nhận diện"
-                    : "Đang nhận diện..."}
+                {isLoading ? "Đang xử lý..." : recognitionStatus === "high_confidence" ? "Tiếp tục nhận diện" : "Đang nhận diện..."}
               </Button>
-
 
               <Button
                 onClick={stopCamera}
@@ -531,20 +1118,18 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       {/* Result Display */}
       {currentResult && !dataCollectionMode && (
         <div className="space-y-4">
-          <h3 className="text-xl font-bold text-primary">Kết Quả Nhận Diện</h3>
+          <h3 className="text-xl font-bold text-primary">Kết quả nhận diện</h3>
 
           <Card className="bg-primary/5 border-2 border-primary/30 p-6 space-y-4">
             <div className="flex justify-between items-center">
-              <span className="text-lg font-semibold text-muted-foreground">Cử Chỉ:</span>
+              <span className="text-lg font-semibold text-muted-foreground">Cử chỉ:</span>
               <span className="text-2xl font-bold text-primary">{currentResult.gesture}</span>
             </div>
 
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <span className="text-lg font-semibold text-muted-foreground">Độ Tin Cậy:</span>
-                <span className="text-xl font-bold text-accent">
-                  {(currentResult.confidence * 100).toFixed(1)}%
-                </span>
+                <span className="text-lg font-semibold text-muted-foreground">Độ tin cậy:</span>
+                <span className="text-xl font-bold text-accent">{(currentResult.confidence * 100).toFixed(1)}%</span>
               </div>
 
               <div className="w-full h-3 bg-muted rounded-full overflow-hidden border border-border">
@@ -556,17 +1141,15 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
             </div>
 
             <div className="space-y-2">
-              <span className="text-lg font-semibold text-muted-foreground block">Văn Bản:</span>
+              <span className="text-lg font-semibold text-muted-foreground block">Văn bản:</span>
               <div className="text-3xl font-bold text-primary text-center bg-primary/10 p-4 rounded-lg border border-primary/20">
                 {currentResult.text}
               </div>
             </div>
 
-            {/* 🔔 Thông báo giữ tay + tự nói sau 10s */}
             {pendingSpeech && (
               <p className="mt-2 text-sm font-semibold text-amber-500 text-center">
-                Hãy giữ vị trí tay của bạn trong{" "}
-                <span className="font-bold">{countdown ?? 0}</span> giây, hệ thống sẽ tự phát âm...
+                Hãy giữ vị trí tay của bạn trong <span className="font-bold">{countdown ?? 0}</span> giây, hệ thống sẽ tự phát âm...
               </p>
             )}
 
@@ -575,6 +1158,15 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
         </div>
       )}
 
+      {mappingError && (
+        <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{mappingError}</AlertDescription>
+        </Alert>
+      )}
+
+      {isMappingLoading && <p className="text-sm text-muted-foreground">Đang tải cấu hình cử chỉ của bạn...</p>}
+
       <Tabs defaultValue="settings" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="settings">Cài Đặt</TabsTrigger>
@@ -582,14 +1174,11 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
         </TabsList>
 
         <TabsContent value="settings" className="space-y-4">
-          <Card className="border-2 border-secondary/20 p-6 space-y-6">
-            {/* Confidence Threshold */}
+          <Card className="border-2 border-secondary/20 p-6 space-y-6 ">
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <Label className="text-base font-semibold">Ngưỡng Độ Tin Cậy</Label>
-                <span className="text-lg font-bold text-primary">
-                  {(confidenceThreshold * 100).toFixed(0)}%
-                </span>
+                <Label className="text-base font-semibold">Ngưỡng độ tin cậy</Label>
+                <span className="text-lg font-bold text-teal-500 ">{(confidenceThreshold * 100).toFixed(0)}%</span>
               </div>
               <Slider
                 value={[confidenceThreshold]}
@@ -597,29 +1186,23 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
                 min={0.3}
                 max={0.95}
                 step={0.05}
-                className="w-full"
+                className="w-full bg-teal-500"
               />
-              <p className="text-sm text-muted-foreground">
-                Chỉ chấp nhận cử chỉ có độ tin cậy cao hơn ngưỡng này
-              </p>
+              <p className="text-sm text-muted-foreground">Chỉ chấp nhận cử chỉ có độ tin cậy cao hơn ngưỡng này</p>
             </div>
 
-            {/* One-Tap Mode */}
             <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
               <div className="space-y-1">
-                <Label className="text-base font-semibold">Chế Độ 1 Chạm</Label>
+                <Label className="text-base font-semibold">Chế độ 1 Chạm</Label>
                 <p className="text-sm text-muted-foreground">Tự động xử lý cử chỉ mà không cần bấm nút</p>
               </div>
               <Switch checked={oneTabMode} onCheckedChange={setOneTabMode} />
             </div>
 
-            {/* Auto-Speak */}
             <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
               <div className="space-y-1">
-                <Label className="text-base font-semibold">Đọc Tự Động</Label>
-                <p className="text-sm text-muted-foreground">
-                  Khi bật, hệ thống sẽ hiển thị thông báo giữ tay và tự đọc sau 3 giây
-                </p>
+                <Label className="text-base font-semibold">Đọc tự động</Label>
+                <p className="text-sm text-muted-foreground">Khi bật, hệ thống sẽ hiển thị thông báo giữ tay và tự đọc sau 3 giây</p>
               </div>
               <Switch checked={autoSpeak} onCheckedChange={setAutoSpeak} />
             </div>
@@ -632,66 +1215,383 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
               <>
                 <Alert>
                   <Info className="h-4 w-4" />
-                  <AlertDescription>
-                    Chế độ thu thập dữ liệu cho phép bạn ghi lại các mẫu cử chỉ để huấn luyện model.
-                  </AlertDescription>
+                  <AlertDescription>Chế độ thu thập dữ liệu cho phép bạn ghi lại các mẫu cử chỉ để huấn luyện model.</AlertDescription>
                 </Alert>
+
                 <Button
-                  onClick={() => setDataCollectionMode(true)}
+                  onClick={() => {
+                    setDataCollectionMode(true)
+                    setCollectionMethod("none")
+                    setUploadDataUrl(null)
+                    setUploadFileName(null)
+                    setUploadError(null)
+                    setUploadPredictResult(null)
+                    refreshSampleCounts()
+                  }}
                   className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-6"
                 >
-                  Bật Chế Độ Thu Thập Dữ Liệu
+                  Bật chế độ thu thập dữ liệu
                 </Button>
               </>
             ) : (
               <>
-                <div className="space-y-3">
-                  <Label className="text-base font-semibold">Chọn Cử Chỉ Để Ghi Dữ Liệu</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {defaultGestures.map((gesture) => (
-                      <Button
-                        key={gesture.id}
-                        variant={selectedGestureForCollection === gesture.id ? "default" : "outline"}
-                        onClick={() => setSelectedGestureForCollection(gesture.id)}
-                        className="flex flex-col items-center gap-2 py-4"
-                      >
-                        <span className="text-lg font-bold">{gesture.id}</span>
-                        <span className="text-xs">{collectedSamples[gesture.id] || 0} mẫu</span>
-                      </Button>
-                    ))}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-lg font-bold text-teal-500">Thu thập dữ liệu</p>
+
                   </div>
-                </div>
 
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Giơ cử chỉ "{selectedGestureForCollection}" rồi bấm "Lưu Mẫu" để ghi lại
-                  </p>
                   <Button
-                    onClick={handleCollectSample}
-                    className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-6"
+                    variant="outline"
+                    className="hover:bg-teal-500"
+                    onClick={() => {
+                      setDataCollectionMode(false)
+                      setCollectionMethod("none")
+                      setUploadDataUrl(null)
+                      setUploadFileName(null)
+                      setUploadError(null)
+                      setUploadPredictResult(null)
+                    }}
                   >
-                    Lưu Mẫu
-                  </Button>
-
-                  <Button onClick={() => setDataCollectionMode(false)} variant="outline" className="w-full">
-                    Tắt Chế Độ Thu Thập
+                    Tắt chế độ
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  {defaultGestures.map((gesture) => (
-                    <div
-                      key={gesture.id}
-                      className="text-center p-3 bg-primary/5 rounded-lg border border-primary/20"
-                    >
-                      <p className="text-lg font-bold text-primary">{gesture.id}</p>
-                      <p className="text-2xl font-bold text-accent">
-                        {collectedSamples[gesture.id] || 0}
-                      </p>
-                      <p className="text-xs text-muted-foreground">mẫu</p>
+                {collectionMethod === "none" ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Card className="p-5 border-2 border-blue-200 bg-blue-50/40">
+                      <div className="space-y-2">
+                        <p className="text-lg font-bold text-blue-700">Thu thập bằng ảnh</p>
+                      </div>
+                      <Button
+                        className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-6"
+                        onClick={() => {
+                          setCollectionMethod("image")
+                          setUploadError(null)
+                          setUploadPredictResult(null)
+                        }}
+                      >
+                        Chọn phương thức ảnh
+                      </Button>
+                    </Card>
+
+                    <Card className="p-5 border-2 border-green-200 bg-green-50/40">
+                      <div className="space-y-2">
+                        <p className="text-lg font-bold text-green-700">Thu thập bằng camera</p>
+                      </div>
+                      <Button
+                        className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
+                        onClick={() => setCollectionMethod("camera")}
+                      >
+                        Chọn phương thức camera
+                      </Button>
+                    </Card>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border p-4 bg-muted/20">
+                      <div>
+                        <p className="font-semibold">
+                          Phương thức đang dùng:{" "}
+                          <span className={collectionMethod === "image" ? "text-blue-700 font-bold" : "text-green-700 font-bold"}>
+                            {collectionMethod === "image" ? "Thu thập bằng ảnh" : "Thu thập bằng camera"}
+                          </span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">Bạn có thể đổi phương thức bất kỳ lúc nào.</p>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        className="hover:bg-teal-500"
+                        onClick={() => {
+                          setCollectionMethod("none")
+                          setUploadDataUrl(null)
+                          setUploadFileName(null)
+                          setUploadError(null)
+                          setUploadPredictResult(null)
+                        }}
+                      >
+                        Đổi phương thức
+                      </Button>
                     </div>
-                  ))}
-                </div>
+                    {saveNotice && (
+                      <Alert className="mb-4 border-green-500/80 bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-100">
+                        <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                        <AlertDescription className="text-green-700 dark:text-green-100">
+                          {saveNotice}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    {/* IMAGE UPLOAD METHOD - giữ UI cũ nhưng chạy đúng chức năng */}
+                    {collectionMethod === "image" && (
+                      <Card className="p-6 border-2 border-blue-200 bg-blue-50/30">
+                        <div className="mt-4 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-base font-bold text-foreground">Tải Ảnh Cử Chỉ Lên</h3>
+                            <Badge variant="outline" className="text-xs">
+                              Giới hạn: 10MB
+                            </Badge>
+                          </div>
+
+                          {uploadError && (
+                            <Alert variant="destructive" className="bg-red-50 dark:bg-red-950/30 border-red-200">
+                              <AlertCircle className="h-4 w-4" />
+                              <AlertDescription className="text-sm">{uploadError}</AlertDescription>
+                            </Alert>
+                          )}
+
+                          {uploadDataUrl ? (
+                            <div className="space-y-4">
+                              <div className="relative w-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden border border-border/50 shadow-inner">
+                                <img
+                                  src={uploadDataUrl || "/placeholder.svg"}
+                                  alt="Uploaded gesture"
+                                  className="w-full aspect-video object-contain"
+                                />
+                                <Button
+                                  onClick={clearUploadedImage}
+                                  size="sm"
+                                  variant="destructive"
+                                  className="absolute top-3 right-3 shadow-lg"
+                                  aria-label="Remove uploaded image"
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+
+                              <Button
+                                onClick={handleRecognizeUploadedImage}
+                                disabled={isUploadPredicting || !uploadDataUrl}
+                                size="lg"
+                                className="w-full bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-white font-bold text-base h-14 shadow-md hover:shadow-lg transition-all"
+                              >
+                                {isUploadPredicting ? (
+                                  <span className="flex items-center gap-2">
+                                    <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                                    Đang nhận diện...
+                                  </span>
+                                ) : (
+                                  "Nhận Diện"
+                                )}
+                              </Button>
+
+                              {uploadPredictResult && (
+                                <Card className="p-4 border border-blue-200 bg-white/70 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm text-muted-foreground">Kết quả:</span>
+                                    <span className="font-bold text-blue-700">
+                                      {uploadPredictResult.has_hand === false || uploadPredictResult.gesture === "no_hand"
+                                        ? "Không thấy tay"
+                                        : `Cử chỉ ${uploadPredictResult.gesture}`}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm text-muted-foreground">Độ tin cậy:</span>
+                                    <span className="font-bold">
+                                      {(Number(uploadPredictResult.confidence || 0) * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <span className="text-sm text-muted-foreground">Văn bản:</span>
+                                    <div className="font-bold text-lg text-center rounded-md border p-3">
+                                      {uploadPredictResult.text || "Không xác định"}
+                                    </div>
+                                  </div>
+
+                                  {!canSaveUpload && (
+                                    <Alert>
+                                      <Info className="h-4 w-4" />
+                                      <AlertDescription>Ảnh này không thấy tay rõ nên hệ thống không cho lưu làm mẫu.</AlertDescription>
+                                    </Alert>
+                                  )}
+                                </Card>
+                              )}
+
+                              <Button
+                                onClick={handleSaveUploadedSample}
+                                disabled={isSavingUpload || !uploadPredictResult || !canSaveUpload}
+                                size="lg"
+                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-14 shadow-md hover:shadow-lg transition-all"
+                              >
+                                {isSavingUpload ? "Đang lưu..." : "Lưu ảnh này làm mẫu"}
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handleUploadFileChange}
+                                className="hidden"
+                                id="image-upload"
+                              />
+                              <label
+                                htmlFor="image-upload"
+                                className="flex flex-col items-center justify-center w-full h-48 px-4 border-2 border-dashed border-border/50 rounded-xl cursor-pointer bg-gradient-to-br from-secondary/5 to-transparent hover:from-secondary/10 hover:to-secondary/5 transition-all group"
+                              >
+                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                  <div className="p-3 bg-primary/10 rounded-full mb-3 group-hover:scale-110 transition-transform">
+                                    <Upload className="w-8 h-8 text-primary" />
+                                  </div>
+                                  <p className="mb-2 text-base font-semibold text-foreground">Nhấp để tải ảnh lên hoặc kéo thả vào đây</p>
+                                  <p className="text-sm text-muted-foreground">PNG, JPG, JPEG (tối đa 5MB)</p>
+                                </div>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* CAMERA METHOD (giữ nguyên) */}
+                    {/* {collectionMethod === "camera" && (
+                      <Card className="p-6 border-2 border-green-200 bg-green-50/30 space-y-4">
+                        <div className="space-y-1">
+                          <p className="text-lg font-bold text-green-700">Chụp từ camera để thu thập</p>
+                          <p className="text-sm text-green-700/80">Bật camera ở phía trên, giơ tay đúng cử chỉ rồi bấm “Lưu mẫu”.</p>
+                        </div>
+
+                        <Button
+                          onClick={handleCollectSample}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
+                          disabled={!isStreamActive}
+                        >
+                          Lưu mẫu từ camera
+                        </Button>
+
+                        {!isStreamActive && (
+                          <Alert>
+                            <Info className="h-4 w-4" />
+                            <AlertDescription>Camera chưa bật. Hãy khởi động camera ở phần trên trước khi lưu mẫu.</AlertDescription>
+                          </Alert>
+                        )}
+                      </Card>
+                    )} */}
+                    {collectionMethod === "camera" && (
+                      <Card className="p-6 border-2 border-green-200 bg-green-50/30 space-y-4">
+                        <div className="space-y-1">
+                          <p className="text-lg font-bold text-green-700">Chụp từ camera để thu thập</p>
+                          <p className="text-sm text-green-700/80">
+                            Chọn nhãn → giơ tay đúng cử chỉ → bấm “Lưu mẫu”. Hệ thống chỉ lưu khi thấy tay rõ và đủ độ tin cậy.
+                          </p>
+                        </div>
+
+                        {/* error riêng cho collect */}
+                        {collectError && (
+                          <Alert variant="destructive" className="bg-red-50 dark:bg-red-950/30 border-red-200">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertDescription className="text-sm">{collectError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {/* Chọn nhãn cần thu thập */}
+                        <div className="space-y-2">
+                          <p className="font-semibold text-green-800">
+                            Nhãn đang thu thập: <span className="font-bold">{selectedGestureForCollection}</span>{" "}
+                            <span className="text-sm text-muted-foreground">
+                              (hiện có {collectedSamples[selectedGestureForCollection] || 0} mẫu)
+                            </span>
+                          </p>
+
+                          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                            {gestureList.map((g) => {
+                              const id = String(g.id)
+                              const active = id === String(selectedGestureForCollection)
+                              return (
+                                <Button
+                                  key={id}
+                                  type="button"
+                                  variant={active ? "default" : "outline"}
+                                  className={active ? "bg-green-600 hover:bg-green-700" : ""}
+                                  onClick={() => setSelectedGestureForCollection(id)}
+                                  disabled={isCollecting}
+                                >
+                                  {id}
+                                </Button>
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Chọn batch size */}
+                        <div className="space-y-2">
+                          <p className="font-semibold text-green-800">Số mẫu mỗi lần lưu</p>
+                          <div className="flex gap-2 flex-wrap">
+                            {([1, 5, 10] as const).map((n) => {
+                              const active = n === collectBatchSize
+                              return (
+                                <Button
+                                  key={n}
+                                  type="button"
+                                  variant={active ? "default" : "outline"}
+                                  className={active ? "bg-green-600 hover:bg-green-700" : ""}
+                                  onClick={() => setCollectBatchSize(n)}
+                                  disabled={isCollecting}
+                                >
+                                  {n} mẫu
+                                </Button>
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Progress */}
+                        {isCollecting && collectProgress && (
+                          <Alert className="border-blue-300 bg-blue-50">
+                            <Info className="h-4 w-4" />
+                            <AlertDescription className="text-sm">
+                              Đang thu thập... đã lưu {collectProgress.saved}/{collectProgress.tried} (mục tiêu {collectBatchSize})
+                            </AlertDescription>
+                          </Alert>
+                        )}
+
+                        {/* <Button
+                          onClick={handleCollectSample}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
+                          disabled={!isStreamActive || isCollecting}
+                        >
+                          {isCollecting ? "Đang lưu..." : `Lưu ${collectBatchSize} mẫu từ camera`}
+                        </Button> */}
+
+                        <p className="text-sm text-muted-foreground">{handHint}</p>
+
+                        <Button
+                          onClick={handleCollectSample}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
+                          disabled={!isStreamActive || !canSaveCamera || isCollecting}
+                        >
+                          {isCollecting
+                            ? `Đang lưu... ${collectProgress?.saved ?? 0}/${collectBatchSize}`
+                            : `Lưu ${collectBatchSize} mẫu`}
+                        </Button>
+
+
+
+                        {!isStreamActive && (
+                          <Alert>
+                            <Info className="h-4 w-4" />
+                            <AlertDescription>Camera chưa bật. Hãy khởi động camera ở phần trên trước khi lưu mẫu.</AlertDescription>
+                          </Alert>
+                        )}
+                      </Card>
+                    )}
+
+
+                    <div className="grid grid-cols-3 gap-2">
+                      {gestureList.map((gesture) => (
+                        <div key={gesture.id} className="text-center p-3 bg-primary/5 rounded-lg border border-primary/20">
+                          <p className="text-lg font-bold text-primary">{gesture.id}</p>
+                          <p className="text-xs text-muted-foreground mb-1">{gesture.text}</p>
+                          <p className="text-2xl font-bold text-accent">{collectedSamples[gesture.id] || 0}</p>
+                          <p className="text-xs text-muted-foreground">mẫu</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </Card>
