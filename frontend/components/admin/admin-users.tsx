@@ -18,7 +18,9 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RotateCcw } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useAuth } from "@/lib/auth-context"
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000"
 interface User {
   id: string
   email: string
@@ -34,43 +36,74 @@ export default function AdminUsers() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [newPassword, setNewPassword] = useState("")
   const [userToToggleLock, setUserToToggleLock] = useState<string | null>(null)
-
+  const { token } = useAuth()
+  // useEffect(() => {
+  //   // Mock loading users from localStorage
+  //   const storedUsers = localStorage.getItem("app_users")
+  //   if (storedUsers) {
+  //     setUsers(JSON.parse(storedUsers))
+  //   } else {
+  //     const mockUsers: User[] = [
+  //       {
+  //         id: "1",
+  //         email: "user@example.com",
+  //         name: "Người Dùng 1",
+  //         role: "user",
+  //         isLocked: false,
+  //         createdAt: new Date("2024-01-15").toISOString(),
+  //       },
+  //       {
+  //         id: "2",
+  //         email: "admin@example.com",
+  //         name: "Admin",
+  //         role: "admin",
+  //         isLocked: false,
+  //         createdAt: new Date("2024-01-01").toISOString(),
+  //       },
+  //     ]
+  //     setUsers(mockUsers)
+  //     localStorage.setItem("app_users", JSON.stringify(mockUsers))
+  //   }
+  //   setIsLoading(false)
+  // }, [])
   useEffect(() => {
-    // Mock loading users from localStorage
-    const storedUsers = localStorage.getItem("app_users")
-    if (storedUsers) {
-      setUsers(JSON.parse(storedUsers))
-    } else {
-      const mockUsers: User[] = [
-        {
-          id: "1",
-          email: "user@example.com",
-          name: "Người Dùng 1",
-          role: "user",
-          isLocked: false,
-          createdAt: new Date("2024-01-15").toISOString(),
-        },
-        {
-          id: "2",
-          email: "admin@example.com",
-          name: "Admin",
-          role: "admin",
-          isLocked: false,
-          createdAt: new Date("2024-01-01").toISOString(),
-        },
-      ]
-      setUsers(mockUsers)
-      localStorage.setItem("app_users", JSON.stringify(mockUsers))
-    }
-    setIsLoading(false)
-  }, [])
+    if (!token) return
 
-  const handleLockUser = (userId: string) => {
-    const updated = users.map((u) => (u.id === userId ? { ...u, isLocked: !u.isLocked } : u))
-    setUsers(updated)
-    localStorage.setItem("app_users", JSON.stringify(updated))
-    setUserToToggleLock(null)
+    const run = async () => {
+      setIsLoading(true)
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/users?limit=200&offset=0`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const data: User[] = await res.json()
+        setUsers(data)
+      } catch (e) {
+        console.error("load users failed:", e)
+        setUsers([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    run()
+  }, [token])
+
+
+  const handleChangeRole = async (userId: string, newRole: "user" | "admin") => {
+    if (!token) return
+    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}/role`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ role: newRole }),
+    })
+    if (!res.ok) {
+      alert(await res.text())
+      return
+    }
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)))
   }
+
 
   const handleResetPassword = (userId: string) => {
     if (!newPassword) return
@@ -80,10 +113,19 @@ export default function AdminUsers() {
     setNewPassword("")
   }
 
-  const handleChangeRole = (userId: string, newRole: "user" | "admin") => {
-    const updated = users.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-    setUsers(updated)
-    localStorage.setItem("app_users", JSON.stringify(updated))
+  const handleLockUser = async (userId: string, locked: boolean) => {
+    if (!token) return
+    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}/lock`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ locked }),
+    })
+    if (!res.ok) {
+      alert(await res.text())
+      return
+    }
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isLocked: locked } : u)))
+    setUserToToggleLock(null)
   }
 
   const formatDate = (date: string | Date) => {
@@ -136,9 +178,8 @@ export default function AdminUsers() {
                 </TableCell>
                 <TableCell>
                   <span
-                    className={`text-xs px-2 py-1 rounded ${
-                      user.isLocked ? "bg-destructive/10 text-destructive" : "bg-green-500/10 text-green-600"
-                    }`}
+                    className={`text-xs px-2 py-1 rounded ${user.isLocked ? "bg-destructive/10 text-destructive" : "bg-green-500/10 text-green-600"
+                      }`}
                   >
                     {user.isLocked ? "Bị Khoá" : "Hoạt Động"}
                   </span>
@@ -193,7 +234,7 @@ export default function AdminUsers() {
                         <div className="flex gap-3">
                           <AlertDialogCancel>Huỷ</AlertDialogCancel>
                           <AlertDialogAction
-                            onClick={() => handleLockUser(user.id)}
+                            onClick={() => handleLockUser(user.id, !user.isLocked)}
                             className={user.isLocked ? "bg-primary" : "bg-destructive"}
                           >
                             {user.isLocked ? "Mở Khoá" : "Khoá"}

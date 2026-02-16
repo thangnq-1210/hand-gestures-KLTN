@@ -24,7 +24,7 @@ class PredictionLog(Base):
     confidence = Column(Float, nullable=False)
     has_hand = Column(Boolean, nullable=False, default=True)
     model_version = Column(String(50))
-    is_correct = Column(Boolean)  # có thể null
+    is_correct = Column(Boolean)  
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

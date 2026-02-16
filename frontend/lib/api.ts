@@ -15,7 +15,7 @@ export interface User {
 
 export interface AuthResponse {
   access_token: string;
-  token_type: string; // "bearer"
+  token_type: string; 
   user: User;
 }
 
@@ -43,7 +43,7 @@ export async function apiRegister(data: {
   email: string;
   password: string;
   name: string;
-  role?: "user" | "caregiver"; // nếu cho chọn role
+  role?: "user" | "caregiver";
 }): Promise<AuthResponse | User> {
   const res = await fetch(`${API_BASE_URL}/auth/register`, {
     method: "POST",
@@ -58,13 +58,9 @@ export async function apiRegister(data: {
     throw new Error(text || "Register failed");
   }
 
-  // tuỳ backend trả gì:
-  // - Nếu bạn cho /auth/register trả luôn token + user → dùng AuthResponse
-  // - Nếu chỉ trả user → sửa kiểu trả về cho phù hợp
   return res.json();
 }
 
-// Ví dụ: helper gọi API bảo vệ bằng JWT
 export async function apiGetMe(token: string): Promise<User> {
   const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: {

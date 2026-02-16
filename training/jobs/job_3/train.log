@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "D:\Work\FIT\KLTN\hand-gestures-KLTN\backend\train\train_mlflow.py", line 328, in <module>
+    main(args.manifest, args.ids, args.out_metadata)
+  File "D:\Work\FIT\KLTN\hand-gestures-KLTN\backend\train\train_mlflow.py", line 138, in main
+    train_df, val_df = train_test_split(
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\sklearn\utils\_param_validation.py", line 218, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\sklearn\model_selection\_split.py", line 2919, in train_test_split
+    n_train, n_test = _validate_shuffle_split(
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\sklearn\model_selection\_split.py", line 2499, in _validate_shuffle_split
+    raise ValueError(
+ValueError: With n_samples=1, test_size=0.2 and train_size=None, the resulting train set will be empty. Adjust any of the aforementioned parameters.
+[0m

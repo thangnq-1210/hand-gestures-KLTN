@@ -35,12 +35,38 @@ interface Sample {
   source?: SampleSource
   created_at?: string | null
 }
+function AuthedImage({ url, token, className }: { url: string; token: string; className?: string }) {
+  const [src, setSrc] = useState<string | null>(null)
 
+  useEffect(() => {
+    let alive = true
+    let objUrl: string | null = null
+    setSrc(null)
+
+      ; (async () => {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const blob = await res.blob()
+        objUrl = URL.createObjectURL(blob)
+        if (alive) setSrc(objUrl)
+      })()
+
+    return () => {
+      alive = false
+      if (objUrl) URL.revokeObjectURL(objUrl)
+    }
+  }, [url, token])
+
+  if (!src) return <div className={className ?? "w-full h-full bg-muted animate-pulse"} />
+  return <img src={src} alt="" className={className ?? "w-full h-full object-cover"} />
+}
 export default function PrivacyPage() {
-  const { user, isAuthenticated } = useAuth()
+  // const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, token } = useAuth()
   const router = useRouter()
 
-  // ✅ Hooks luôn nằm trước mọi return để tránh lỗi “Rendered more hooks than during the previous render”
   const [dataCollection, setDataCollection] = useState(true)
   const [dataTraining, setDataTraining] = useState(true)
   const [analytics, setAnalytics] = useState(true)
@@ -78,7 +104,9 @@ export default function PrivacyPage() {
     setSamplesError(null)
 
     try {
-      const res = await fetch(`${API_BASE_URL}/collect/my-samples?user_id=${user.id}`)
+      const res = await fetch(`${API_BASE_URL}/collect/my-samples`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || "Không thể tải danh sách mẫu.")
@@ -169,10 +197,9 @@ export default function PrivacyPage() {
     }
   }, [user?.id, labelToDelete, samplesByLabel, fetchSamples])
 
-
-
   if (!isAuthenticated) return null
   if (!user) return null
+  const isAdmin = user.role === "admin"
 
   const showSuccess = useCallback((msg: string) => {
     setSuccessMessage(msg)
@@ -344,7 +371,12 @@ export default function PrivacyPage() {
                                 <span>
                                   Mẫu cử chỉ: {gesture.name} ({list.length})
                                 </span>
-                                {list.length > 0 && (
+                                {/* {list.length > 0 && (
+                                  <Button variant="destructive" size="sm" onClick={() => setLabelToDelete(gesture.id)}>
+                                    Xóa tất cả
+                                  </Button>
+                                )} */}
+                                {isAdmin && list.length > 0 && (
                                   <Button variant="destructive" size="sm" onClick={() => setLabelToDelete(gesture.id)}>
                                     Xóa tất cả
                                   </Button>
@@ -365,7 +397,12 @@ export default function PrivacyPage() {
                                       key={s.id}
                                       className="group relative aspect-video rounded-md overflow-hidden border bg-muted"
                                     >
-                                      <img src={fullUrl} alt={`Sample ${s.id}`} className="w-full h-full object-cover" />
+                                      {/* <img src={fullUrl} alt={`Sample ${s.id}`} className="w-full h-full object-cover" /> */}
+                                      {token ? (
+                                        <AuthedImage url={fullUrl} token={token} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <div className="w-full h-full bg-muted" />
+                                      )}
                                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                         <Button
                                           size="icon"
@@ -375,14 +412,25 @@ export default function PrivacyPage() {
                                         >
                                           <ZoomIn className="h-4 w-4" />
                                         </Button>
-                                        <Button
+                                        {/* <Button
                                           size="icon"
                                           variant="destructive"
                                           className="h-8 w-8"
                                           onClick={() => setSampleToDelete(s)}
                                         >
                                           <Trash2 className="h-4 w-4" />
-                                        </Button>
+                                        </Button> */}
+                                        {isAdmin && (
+                                          <Button
+                                            size="icon"
+                                            variant="destructive"
+                                            className="h-8 w-8"
+                                            onClick={() => setSampleToDelete(s)}
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        )}
+
                                       </div>
                                     </div>
                                   )
@@ -410,71 +458,67 @@ export default function PrivacyPage() {
                       <Trash2 className="w-4 h-4 mr-2" />
                       Xoá Tất Cả Dữ Liệu
                     </Button>
-                    {/* <AlertDialogContent>
-                      <AlertDialogTitle>Xoá Tất Cả Dữ Liệu?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Hành động này sẽ xoá vĩnh viễn tất cả dữ liệu của bạn bao gồm lịch sử, mẫu, và cài đặt. Bạn sẽ
-                        không thể khôi phục.
-                      </AlertDialogDescription>
-                      <div className="flex gap-3">
-                        <AlertDialogCancel>Huỷ</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDeleteAllData} className="bg-destructive">
-                          Xoá Vĩnh Viễn
-                        </AlertDialogAction>
-                      </div>
-                    </AlertDialogContent> */}
-                    {/* </AlertDialog> */}
+                    {/* ===== Confirm delete ONE sample ===== */}
+                    {isAdmin && (
+                      <AlertDialog open={!!sampleToDelete} onOpenChange={(open) => !open && setSampleToDelete(null)}>
+                        <AlertDialogContent>
+                          <AlertDialogTitle>Xoá mẫu này?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Bạn có chắc muốn xoá mẫu <b>{sampleToDelete?.filename}</b> (nhãn <b>{sampleToDelete?.label}</b>) không?
+                            Hành động này không thể hoàn tác.
+                          </AlertDialogDescription>
+
+                          <div className="flex gap-3">
+                            <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={confirmDeleteSample}
+                              className="bg-destructive"
+                              disabled={isDeleting}
+                            >
+                              {isDeleting ? "Đang xoá..." : "Xoá"}
+                            </AlertDialogAction>
+                          </div>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                    {/* ===== Confirm delete ALL samples of a gesture ===== */}
+                    {isAdmin && (
+                      <AlertDialog open={!!labelToDelete} onOpenChange={(open) => !open && setLabelToDelete(null)}>
+                        <AlertDialogContent>
+                          <AlertDialogTitle>Xoá tất cả mẫu của cử chỉ này?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Bạn có chắc muốn xoá{" "}
+                            <b>{labelToDelete ? (samplesByLabel[labelToDelete]?.length ?? 0) : 0}</b>{" "}
+                            mẫu của cử chỉ <b>{labelToDelete}</b> không?
+                            Hành động này không thể hoàn tác.
+                          </AlertDialogDescription>
+
+                          <div className="flex gap-3">
+                            <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={confirmDeleteAllForGesture}
+                              className="bg-destructive"
+                              disabled={isDeleting}
+                            >
+                              {isDeleting ? "Đang xoá..." : "Xoá tất cả"}
+                            </AlertDialogAction>
+                          </div>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                    {isAdmin && (
+                      <Link href="/admin/samples">
+                        <Button variant="default" className="w-full">
+                          Quản lý dữ liệu huấn luyện
+                        </Button>
+                      </Link>
+                    )}
                   </Dialog>
                 </div>
               </div>
             </Card>
           </TabsContent>
 
-          {/* ===== Confirm delete ONE sample ===== */}
-          <AlertDialog open={!!sampleToDelete} onOpenChange={(open) => !open && setSampleToDelete(null)}>
-            <AlertDialogContent>
-              <AlertDialogTitle>Xoá mẫu này?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Bạn có chắc muốn xoá mẫu <b>{sampleToDelete?.filename}</b> (nhãn <b>{sampleToDelete?.label}</b>) không?
-                Hành động này không thể hoàn tác.
-              </AlertDialogDescription>
-
-              <div className="flex gap-3">
-                <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={confirmDeleteSample}
-                  className="bg-destructive"
-                  disabled={isDeleting}
-                >
-                  {isDeleting ? "Đang xoá..." : "Xoá"}
-                </AlertDialogAction>
-              </div>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          {/* ===== Confirm delete ALL samples of a gesture ===== */}
-          <AlertDialog open={!!labelToDelete} onOpenChange={(open) => !open && setLabelToDelete(null)}>
-            <AlertDialogContent>
-              <AlertDialogTitle>Xoá tất cả mẫu của cử chỉ này?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Bạn có chắc muốn xoá{" "}
-                <b>{labelToDelete ? (samplesByLabel[labelToDelete]?.length ?? 0) : 0}</b>{" "}
-                mẫu của cử chỉ <b>{labelToDelete}</b> không?
-                Hành động này không thể hoàn tác.
-              </AlertDialogDescription>
-
-              <div className="flex gap-3">
-                <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={confirmDeleteAllForGesture}
-                  className="bg-destructive"
-                  disabled={isDeleting}
-                >
-                  {isDeleting ? "Đang xoá..." : "Xoá tất cả"}
-                </AlertDialogAction>
-              </div>
-            </AlertDialogContent>
-          </AlertDialog>
 
 
           {/* Security Tab */}
@@ -519,10 +563,17 @@ export default function PrivacyPage() {
               </Button>
             </DialogClose>
 
-            {viewingImage && (
+            {/* {viewingImage && (
               <img
                 src={viewingImage}
                 alt="Full size preview"
+                className="max-w-[90vw] max-h-[90vh] object-contain"
+              />
+            )} */}
+            {viewingImage && token && (
+              <AuthedImage
+                url={viewingImage}
+                token={token}
                 className="max-w-[90vw] max-h-[90vh] object-contain"
               />
             )}

@@ -14,6 +14,9 @@ from .api.auth import router as auth_router
 from .api.gesture_predict import router as gesture_predict_router
 from .api.gesture import router as gesture_mapping_router
 
+from .api.admin import router as admin_router
+
+from .api.stats import router as stats_router
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -31,7 +34,6 @@ def root():
 
 @app.get("/db-test")
 def db_test(db: Session = Depends(get_db)):
-    # test đơn giản SELECT 1
     result = db.execute(text("SELECT 1")).scalar()
     return {"db_ok": result == 1}
 
@@ -43,3 +45,5 @@ app.include_router(gesture_mapping_router)
 app.include_router(gesture_router)
 app.include_router(collect_router)
 app.include_router(tts_router)
+app.include_router(admin_router)
+app.include_router(stats_router)

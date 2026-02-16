@@ -29,8 +29,16 @@ export default function LoginPage() {
     try {
       await login(email, password)
       router.push("/")
-    } catch (err) {
-      setError("Đăng nhập thất bại. Vui lòng kiểm tra email và mật khẩu.")
+    } catch (err: any) {
+      const msg = String(err?.message || "").trim()
+
+      if (msg.toLowerCase().includes("khóa")) {
+        setError("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.")
+      } else if (msg) {
+        setError(msg)
+      } else {
+        setError("Đăng nhập thất bại. Vui lòng kiểm tra email và mật khẩu.")
+      }
     } finally {
       setIsLoading(false)
     }
@@ -41,7 +49,6 @@ export default function LoginPage() {
       <Card className="w-full max-w-md border-2 border-primary/20">
         <div className="p-8">
           <h1 className="text-3xl font-bold text-teal-500 mb-2 text-center">Đăng nhập</h1>
-          {/* <p className="text-muted-foreground text-center mb-6">Đăng nhập để sử dụng hệ thống nhận diện cử chỉ</p> */}
 
           {error && (
             <Alert variant="destructive" className="mb-6">
@@ -56,7 +63,7 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
-                placeholder="your@email.com"
+                placeholder="your@gmail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -92,8 +99,6 @@ export default function LoginPage() {
               Đăng ký tại đây
             </Link>
           </div>
-
-          
         </div>
       </Card>
     </main>

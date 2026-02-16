@@ -83,7 +83,8 @@ from ..schemas.gesture import (
     GestureMappingEffective,
     UpdateUserGestureMapping,
 )
-from ..core.security import get_current_user  # hàm bạn đã có trong security.py
+from ..core.security import get_current_user
+
 
 router = APIRouter(prefix="/gestures", tags=["gestures"])
 
@@ -93,12 +94,6 @@ def get_my_gesture_mapping(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """
-    Trả về danh sách cử chỉ cho user hiện tại:
-    - default_text từ gesture_dictionary
-    - custom_text nếu user có override
-    - effective_text = custom_text hoặc default_text
-    """
     dictionaries = (
         db.query(models.GestureDictionary)
         .filter(models.GestureDictionary.is_active == True)
@@ -127,7 +122,6 @@ def get_my_gesture_mapping(
             )
         )
 
-    # để frontend hiển thị theo thứ tự 0..5
     result.sort(key=lambda x: x.model_label)
     return result
 
@@ -139,10 +133,6 @@ def upsert_my_gesture_mapping(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """
-    Tạo hoặc cập nhật custom_text cho 1 label cụ thể
-    """
-    # đảm bảo label tồn tại trong từ điển
     d = (
         db.query(models.GestureDictionary)
         .filter(models.GestureDictionary.model_label == model_label)

@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: data.user.email,
         name: data.user.name,
         role: (data.user.role as any) || "user",
-        preferredLanguage: "vi", // backend chưa trả, default tạm
+        preferredLanguage: "vi", 
         createdAt: new Date(),
       };
 
@@ -149,7 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const data = JSON.parse(text);
             if (data && typeof data.detail === "string") {
-              message = data.detail; // "Email đã được sử dụng"
+              message = data.detail; 
             } else if (typeof data === "string") {
               message = data;
             }

@@ -3,7 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { AlertCircle, CheckCircle2, Info, Camera, Lock, X, Upload } from "lucide-react"
+import { AlertCircle, CheckCircle2, Info, Camera, Lock, X, Upload, Image } from "lucide-react"
 import TextToSpeech from "./text-to-speech"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Slider } from "@/components/ui/slider"
@@ -12,6 +12,13 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useAuth } from "@/lib/auth-context"
 import { Badge } from "@/components/ui/badge"
+// import { Hands } from "@mediapipe/hands"
+import Script from "next/script"
+declare global {
+  interface Window {
+    Hands?: any
+  }
+}
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
@@ -56,6 +63,12 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
+  // const handsRef = useRef<Hands | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const lastSendTsRef = useRef<number>(0)
+  const [hasHandOverlay, setHasHandOverlay] = useState(false)
+
   const [isLoading, setIsLoading] = useState(false)
   const [currentResult, setCurrentResult] = useState<{
     gesture: string
@@ -130,12 +143,11 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
   // const [samplesPerSave, setSamplesPerSave] = useState(5)
   // const [isBurstSaving, setIsBurstSaving] = useState(false)
 
-  // Gọi API TTS backend để phát tiếng Việt chuẩn
   const playServerTTS = useCallback(async (text: string) => {
     try {
       if (!text.trim()) return
 
-      const res = await fetch("http://127.0.0.1:8000/tts/vi", {
+      const res = await fetch(`${API_BASE_URL}/tts/vi`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
@@ -162,7 +174,6 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     }
   }, [])
 
-  // fallback khi chưa lấy được từ backend
   const fallbackGestures = [
     { id: "0", name: "Cử chỉ 0", text: "Xin chào" },
     { id: "1", name: "Cử chỉ 1", text: "Tôi cần giúp đỡ" },
@@ -213,7 +224,6 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     void fetchMapping()
   }, [token, isAuthenticated])
 
-  // dọn dẹp timer khi unmount
   useEffect(() => {
     return () => {
       if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
@@ -282,6 +292,21 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       setIsLoading(true)
       setRecognitionStatus("detecting")
 
+      // Chỗ này xử lý sau (detect ở FE hay BE, cmt là dt ở BE)
+      // if (!hasHandOverlay) {
+      //   setRecognitionStatus("no_hand")
+      //   setCurrentResult({
+      //     gesture: "-",
+      //     text: "Vui lòng giơ tay vào camera",
+      //     confidence: 0,
+      //   })
+
+      //   if (!oneTabMode && !dataCollectionMode) {
+      //     setTimeout(() => void captureAndPredict(), 800)
+      //   }
+      //   return
+      // }
+
       const ctx = canvasRef.current.getContext("2d")
       if (!ctx) return
 
@@ -291,7 +316,8 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
       const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
 
-      const response = await fetch("/api/gesture/predict-base64", {
+      // const response = await fetch("/api/gesture/predict-base64", {
+      const response = await fetch(`${API_BASE_URL}/gesture/predict-base64`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ image: base64Image }),
@@ -429,6 +455,104 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     playServerTTS,
     dataCollectionMode,
   ])
+
+  useEffect(() => {
+    const video = videoRef.current
+    const overlay = overlayCanvasRef.current
+    if (!isStreamActive || !video || !overlay) return
+
+    const ctx = overlay.getContext("2d")
+    if (!ctx) return
+
+    let rafId: number | null = null
+    let cancelled = false
+
+    const initAndRun = async () => {
+      // đợi script load xong (window.Hands có)
+      if (!window.Hands) return
+
+      const hands = new window.Hands({
+        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      })
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      })
+
+      hands.onResults((results: any) => {
+        const w = video.videoWidth
+        const h = video.videoHeight
+        if (!w || !h) return
+
+        overlay.width = w
+        overlay.height = h
+        ctx.clearRect(0, 0, w, h)
+
+        const lm = results.multiHandLandmarks?.[0]
+        if (!lm) {
+          setHasHandOverlay(false)
+          return
+        }
+        setHasHandOverlay(true)
+
+        let minX = 1, minY = 1, maxX = 0, maxY = 0
+        for (const p of lm) {
+          minX = Math.min(minX, p.x)
+          minY = Math.min(minY, p.y)
+          maxX = Math.max(maxX, p.x)
+          maxY = Math.max(maxY, p.y)
+        }
+
+        const x = minX * w
+        const y = minY * h
+        const bw = (maxX - minX) * w
+        const bh = (maxY - minY) * h
+
+        ctx.lineWidth = 4
+        ctx.strokeStyle = "#22c55e"
+        ctx.strokeRect(x, y, bw, bh)
+        ctx.font = "16px sans-serif"
+        ctx.fillStyle = "#22c55e"
+        ctx.fillText("Hand detected", x, Math.max(18, y - 8))
+      })
+
+      let lastTs = 0
+      const loop = async (ts: number) => {
+        if (cancelled) return
+        rafId = requestAnimationFrame(loop)
+
+        // throttle ~10fps
+        if (ts - lastTs < 100) return
+        lastTs = ts
+
+        if (video.readyState < 2) return
+        try {
+          await hands.send({ image: video })
+        } catch { }
+      }
+
+      rafId = requestAnimationFrame(loop)
+    }
+
+    // chạy init vài lần cho tới khi script load (nhẹ)
+    const timer = setInterval(() => {
+      if (window.Hands) {
+        clearInterval(timer)
+        initAndRun()
+      }
+    }, 50)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      if (rafId) cancelAnimationFrame(rafId)
+      ctx.clearRect(0, 0, overlay.width, overlay.height)
+      setHasHandOverlay(false)
+    }
+  }, [isStreamActive])
 
   const initializeCamera = useCallback(async () => {
     try {
@@ -1042,412 +1166,425 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
   }
 
   return (
-    <div className="space-y-6">
-      {/* Camera Section */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-teal-500">Camera nhận diện</h2>
-          <div className="flex items-center gap-2 text-sm">
-            {getStatusIcon()}
-            <span className="text-muted-foreground">{getStatusText()}</span>
+    <>
+      <Script
+        src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
+        strategy="afterInteractive"
+      />
+      <Script
+        src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+        strategy="afterInteractive"
+      />
+      <div className="space-y-6">
+        {/* Camera Section */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-teal-500">Camera nhận diện</h2>
+            <div className="flex items-center gap-2 text-sm">
+              {getStatusIcon()}
+              <span className="text-muted-foreground">{getStatusText()}</span>
+            </div>
+          </div>
+
+          {cameraError && (
+            <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950">
+              <AlertCircle className="h-4 w-4 text-red-600" />
+              <AlertDescription className="text-red-800 dark:text-red-200">{cameraError}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="relative w-full bg-black rounded-lg overflow-hidden border-2 border-primary/30">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full aspect-video object-cover"
+              aria-label="Webcam feed for gesture recognition"
+            />
+            
+            <canvas ref={overlayCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+            <canvas ref={canvasRef} className="hidden" />
+
+            {!isStreamActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white text-center p-4">
+                <Camera className="w-12 h-12 mb-4 opacity-50" />
+                <p className="text-lg font-semibold">Camera chưa khởi động</p>
+                {cameraError && <p className="text-sm mt-2 text-gray-300">Bấm nút dưới để cấp quyền camera</p>}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 flex-wrap">
+            {!isStreamActive ? (
+              <Button
+                onClick={initializeCamera}
+                size="lg"
+                className="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-bold text-lg py-6"
+                disabled={cameraError !== null && recognitionStatus === "not_supported"}
+              >
+                <Camera className="w-5 h-5 mr-2" />
+                Khởi động camera
+              </Button>
+            ) : (
+              <>
+                <Button
+                  onClick={handlePrimaryButtonClick}
+                  disabled={isLoading || !isStreamActive}
+                  size="lg"
+                  className={`flex-1 font-bold text-lg py-6 text-white transition-colors
+                  ${recognitionStatus === "high_confidence" ? "bg-primary hover:bg-primary/90" : "bg-accent hover:bg-accent/90"}`}
+                >
+                  {isLoading ? "Đang xử lý..." : recognitionStatus === "high_confidence" ? "Tiếp tục nhận diện" : "Đang nhận diện..."}
+                </Button>
+
+                <Button
+                  onClick={stopCamera}
+                  variant="outline"
+                  size="lg"
+                  className="px-6 py-6 font-bold text-lg text-white-600 border-red-600 hover:bg-red-50 hover:text-white-600 dark:hover:bg-red-900/30"
+                >
+                  Tắt camera
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        {cameraError && (
-          <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950">
-            <AlertCircle className="h-4 w-4 text-red-600" />
-            <AlertDescription className="text-red-800 dark:text-red-200">{cameraError}</AlertDescription>
+        {/* Result Display */}
+        {currentResult && !dataCollectionMode && (
+          <div className="space-y-4">
+            <h3 className="text-xl font-bold text-primary">Kết quả nhận diện</h3>
+
+            <Card className="bg-primary/5 border-2 border-primary/30 p-6 space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-lg font-semibold text-muted-foreground">Cử chỉ:</span>
+                <span className="text-2xl font-bold text-primary">{currentResult.gesture}</span>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-semibold text-muted-foreground">Độ tin cậy:</span>
+                  <span className="text-xl font-bold text-accent">{(currentResult.confidence * 100).toFixed(1)}%</span>
+                </div>
+
+                <div className="w-full h-3 bg-muted rounded-full overflow-hidden border border-border">
+                  <div
+                    className="h-full bg-gradient-to-r from-secondary to-accent transition-all duration-300"
+                    style={{ width: `${currentResult.confidence * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-lg font-semibold text-muted-foreground block">Văn bản:</span>
+                <div className="text-3xl font-bold text-primary text-center bg-primary/10 p-4 rounded-lg border border-primary/20">
+                  {currentResult.text}
+                </div>
+              </div>
+
+              {pendingSpeech && (
+                <p className="mt-2 text-sm font-semibold text-amber-500 text-center">
+                  Hãy giữ vị trí tay của bạn trong <span className="font-bold">{countdown ?? 0}</span> giây, hệ thống sẽ tự phát âm...
+                </p>
+              )}
+
+              <TextToSpeech text={currentResult.text} />
+            </Card>
+          </div>
+        )}
+
+        {mappingError && (
+          <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{mappingError}</AlertDescription>
           </Alert>
         )}
 
-        <div className="relative w-full bg-black rounded-lg overflow-hidden border-2 border-primary/30">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            className="w-full aspect-video object-cover"
-            aria-label="Webcam feed for gesture recognition"
-          />
-          <canvas ref={canvasRef} className="hidden" />
+        {isMappingLoading && <p className="text-sm text-muted-foreground">Đang tải cấu hình cử chỉ của bạn...</p>}
 
-          {!isStreamActive && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white text-center p-4">
-              <Camera className="w-12 h-12 mb-4 opacity-50" />
-              <p className="text-lg font-semibold">Camera chưa khởi động</p>
-              {cameraError && <p className="text-sm mt-2 text-gray-300">Bấm nút dưới để cấp quyền camera</p>}
-            </div>
-          )}
-        </div>
+        <Tabs defaultValue="settings" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="settings">Cài Đặt</TabsTrigger>
+            <TabsTrigger value="collection">Thu Thập Dữ Liệu</TabsTrigger>
+          </TabsList>
 
-        <div className="flex gap-3 flex-wrap">
-          {!isStreamActive ? (
-            <Button
-              onClick={initializeCamera}
-              size="lg"
-              className="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-bold text-lg py-6"
-              disabled={cameraError !== null && recognitionStatus === "not_supported"}
-            >
-              <Camera className="w-5 h-5 mr-2" />
-              Khởi động camera
-            </Button>
-          ) : (
-            <>
-              <Button
-                onClick={handlePrimaryButtonClick}
-                disabled={isLoading || !isStreamActive}
-                size="lg"
-                className={`flex-1 font-bold text-lg py-6 text-white transition-colors
-                  ${recognitionStatus === "high_confidence" ? "bg-primary hover:bg-primary/90" : "bg-accent hover:bg-accent/90"}`}
-              >
-                {isLoading ? "Đang xử lý..." : recognitionStatus === "high_confidence" ? "Tiếp tục nhận diện" : "Đang nhận diện..."}
-              </Button>
-
-              <Button
-                onClick={stopCamera}
-                variant="outline"
-                size="lg"
-                className="px-6 py-6 font-bold text-lg text-white-600 border-red-600 hover:bg-red-50 hover:text-white-600 dark:hover:bg-red-900/30"
-              >
-                Tắt camera
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Result Display */}
-      {currentResult && !dataCollectionMode && (
-        <div className="space-y-4">
-          <h3 className="text-xl font-bold text-primary">Kết quả nhận diện</h3>
-
-          <Card className="bg-primary/5 border-2 border-primary/30 p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-lg font-semibold text-muted-foreground">Cử chỉ:</span>
-              <span className="text-2xl font-bold text-primary">{currentResult.gesture}</span>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-lg font-semibold text-muted-foreground">Độ tin cậy:</span>
-                <span className="text-xl font-bold text-accent">{(currentResult.confidence * 100).toFixed(1)}%</span>
-              </div>
-
-              <div className="w-full h-3 bg-muted rounded-full overflow-hidden border border-border">
-                <div
-                  className="h-full bg-gradient-to-r from-secondary to-accent transition-all duration-300"
-                  style={{ width: `${currentResult.confidence * 100}%` }}
+          <TabsContent value="settings" className="space-y-4">
+            <Card className="border-2 border-secondary/20 p-6 space-y-6 ">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <Label className="text-base font-semibold">Ngưỡng độ tin cậy</Label>
+                  <span className="text-lg font-bold text-teal-500 ">{(confidenceThreshold * 100).toFixed(0)}%</span>
+                </div>
+                <Slider
+                  value={[confidenceThreshold]}
+                  onValueChange={(value: number[]) => setConfidenceThreshold(value[0])}
+                  min={0.3}
+                  max={0.95}
+                  step={0.05}
+                  className="w-full bg-teal-500"
                 />
+                <p className="text-sm text-muted-foreground">Chỉ chấp nhận cử chỉ có độ tin cậy cao hơn ngưỡng này</p>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <span className="text-lg font-semibold text-muted-foreground block">Văn bản:</span>
-              <div className="text-3xl font-bold text-primary text-center bg-primary/10 p-4 rounded-lg border border-primary/20">
-                {currentResult.text}
+              <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Chế độ 1 Chạm</Label>
+                  <p className="text-sm text-muted-foreground">Tự động xử lý cử chỉ mà không cần bấm nút</p>
+                </div>
+                <Switch checked={oneTabMode} onCheckedChange={setOneTabMode} />
               </div>
-            </div>
 
-            {pendingSpeech && (
-              <p className="mt-2 text-sm font-semibold text-amber-500 text-center">
-                Hãy giữ vị trí tay của bạn trong <span className="font-bold">{countdown ?? 0}</span> giây, hệ thống sẽ tự phát âm...
-              </p>
-            )}
-
-            <TextToSpeech text={currentResult.text} />
-          </Card>
-        </div>
-      )}
-
-      {mappingError && (
-        <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{mappingError}</AlertDescription>
-        </Alert>
-      )}
-
-      {isMappingLoading && <p className="text-sm text-muted-foreground">Đang tải cấu hình cử chỉ của bạn...</p>}
-
-      <Tabs defaultValue="settings" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="settings">Cài Đặt</TabsTrigger>
-          <TabsTrigger value="collection">Thu Thập Dữ Liệu</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="settings" className="space-y-4">
-          <Card className="border-2 border-secondary/20 p-6 space-y-6 ">
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <Label className="text-base font-semibold">Ngưỡng độ tin cậy</Label>
-                <span className="text-lg font-bold text-teal-500 ">{(confidenceThreshold * 100).toFixed(0)}%</span>
+              <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Đọc tự động</Label>
+                  <p className="text-sm text-muted-foreground">Khi bật, hệ thống sẽ hiển thị thông báo giữ tay và tự đọc sau 3 giây</p>
+                </div>
+                <Switch checked={autoSpeak} onCheckedChange={setAutoSpeak} />
               </div>
-              <Slider
-                value={[confidenceThreshold]}
-                onValueChange={(value: number[]) => setConfidenceThreshold(value[0])}
-                min={0.3}
-                max={0.95}
-                step={0.05}
-                className="w-full bg-teal-500"
-              />
-              <p className="text-sm text-muted-foreground">Chỉ chấp nhận cử chỉ có độ tin cậy cao hơn ngưỡng này</p>
-            </div>
+            </Card>
+          </TabsContent>
 
-            <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-              <div className="space-y-1">
-                <Label className="text-base font-semibold">Chế độ 1 Chạm</Label>
-                <p className="text-sm text-muted-foreground">Tự động xử lý cử chỉ mà không cần bấm nút</p>
-              </div>
-              <Switch checked={oneTabMode} onCheckedChange={setOneTabMode} />
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-              <div className="space-y-1">
-                <Label className="text-base font-semibold">Đọc tự động</Label>
-                <p className="text-sm text-muted-foreground">Khi bật, hệ thống sẽ hiển thị thông báo giữ tay và tự đọc sau 3 giây</p>
-              </div>
-              <Switch checked={autoSpeak} onCheckedChange={setAutoSpeak} />
-            </div>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="collection" className="space-y-4">
-          <Card className="border-2 border-accent/20 p-6 space-y-6">
-            {!dataCollectionMode ? (
-              <>
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertDescription>Chế độ thu thập dữ liệu cho phép bạn ghi lại các mẫu cử chỉ để huấn luyện model.</AlertDescription>
-                </Alert>
-
-                <Button
-                  onClick={() => {
-                    setDataCollectionMode(true)
-                    setCollectionMethod("none")
-                    setUploadDataUrl(null)
-                    setUploadFileName(null)
-                    setUploadError(null)
-                    setUploadPredictResult(null)
-                    refreshSampleCounts()
-                  }}
-                  className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-6"
-                >
-                  Bật chế độ thu thập dữ liệu
-                </Button>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="text-lg font-bold text-teal-500">Thu thập dữ liệu</p>
-
-                  </div>
+          <TabsContent value="collection" className="space-y-4">
+            <Card className="border-2 border-accent/20 p-6 space-y-6">
+              {!dataCollectionMode ? (
+                <>
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>Chế độ thu thập dữ liệu cho phép bạn ghi lại các mẫu cử chỉ để huấn luyện model.</AlertDescription>
+                  </Alert>
 
                   <Button
-                    variant="outline"
-                    className="hover:bg-teal-500"
                     onClick={() => {
-                      setDataCollectionMode(false)
+                      setDataCollectionMode(true)
                       setCollectionMethod("none")
                       setUploadDataUrl(null)
                       setUploadFileName(null)
                       setUploadError(null)
                       setUploadPredictResult(null)
+                      refreshSampleCounts()
                     }}
+                    className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-6"
                   >
-                    Tắt chế độ
+                    Bật chế độ thu thập dữ liệu
                   </Button>
-                </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      {/* <p className="text-lg font-bold text-teal-500">Thu thập dữ liệu</p> */}
 
-                {collectionMethod === "none" ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Card className="p-5 border-2 border-blue-200 bg-blue-50/40">
-                      <div className="space-y-2">
-                        <p className="text-lg font-bold text-blue-700">Thu thập bằng ảnh</p>
-                      </div>
-                      <Button
-                        className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-6"
-                        onClick={() => {
-                          setCollectionMethod("image")
-                          setUploadError(null)
-                          setUploadPredictResult(null)
-                        }}
-                      >
-                        Chọn phương thức ảnh
-                      </Button>
-                    </Card>
-
-                    <Card className="p-5 border-2 border-green-200 bg-green-50/40">
-                      <div className="space-y-2">
-                        <p className="text-lg font-bold text-green-700">Thu thập bằng camera</p>
-                      </div>
-                      <Button
-                        className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
-                        onClick={() => setCollectionMethod("camera")}
-                      >
-                        Chọn phương thức camera
-                      </Button>
-                    </Card>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between gap-3 rounded-lg border p-4 bg-muted/20">
-                      <div>
-                        <p className="font-semibold">
-                          Phương thức đang dùng:{" "}
-                          <span className={collectionMethod === "image" ? "text-blue-700 font-bold" : "text-green-700 font-bold"}>
-                            {collectionMethod === "image" ? "Thu thập bằng ảnh" : "Thu thập bằng camera"}
-                          </span>
-                        </p>
-                        <p className="text-sm text-muted-foreground">Bạn có thể đổi phương thức bất kỳ lúc nào.</p>
-                      </div>
-
-                      <Button
-                        variant="outline"
-                        className="hover:bg-teal-500"
-                        onClick={() => {
-                          setCollectionMethod("none")
-                          setUploadDataUrl(null)
-                          setUploadFileName(null)
-                          setUploadError(null)
-                          setUploadPredictResult(null)
-                        }}
-                      >
-                        Đổi phương thức
-                      </Button>
                     </div>
-                    {saveNotice && (
-                      <Alert className="mb-4 border-green-500/80 bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-100">
-                        <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-                        <AlertDescription className="text-green-700 dark:text-green-100">
-                          {saveNotice}
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                    {/* IMAGE UPLOAD METHOD - giữ UI cũ nhưng chạy đúng chức năng */}
-                    {collectionMethod === "image" && (
-                      <Card className="p-6 border-2 border-blue-200 bg-blue-50/30">
-                        <div className="mt-4 space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="text-base font-bold text-foreground">Tải Ảnh Cử Chỉ Lên</h3>
-                            <Badge variant="outline" className="text-xs">
-                              Giới hạn: 10MB
-                            </Badge>
-                          </div>
 
-                          {uploadError && (
-                            <Alert variant="destructive" className="bg-red-50 dark:bg-red-950/30 border-red-200">
-                              <AlertCircle className="h-4 w-4" />
-                              <AlertDescription className="text-sm">{uploadError}</AlertDescription>
-                            </Alert>
-                          )}
+                    <Button
+                      variant="outline"
+                      className="hover:bg-teal-500"
+                      onClick={() => {
+                        setDataCollectionMode(false)
+                        setCollectionMethod("none")
+                        setUploadDataUrl(null)
+                        setUploadFileName(null)
+                        setUploadError(null)
+                        setUploadPredictResult(null)
+                      }}
+                    >
+                      Tắt chế độ
+                    </Button>
+                  </div>
 
-                          {uploadDataUrl ? (
-                            <div className="space-y-4">
-                              <div className="relative w-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden border border-border/50 shadow-inner">
-                                <img
-                                  src={uploadDataUrl || "/placeholder.svg"}
-                                  alt="Uploaded gesture"
-                                  className="w-full aspect-video object-contain"
-                                />
+                  {collectionMethod === "none" ? (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Card className="p-5 border-2 border-blue-200 bg-blue-50/40">
+                        <div className="flex items-center gap-2">
+                          <Image className="w-6 h-6 text-blue-700" />
+                          <p className="text-lg font-bold text-blue-700">Thu thập bằng ảnh</p>
+                        </div>
+                        <Button
+                          className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-6"
+                          onClick={() => {
+                            setCollectionMethod("image")
+                            setUploadError(null)
+                            setUploadPredictResult(null)
+                          }}
+                        >
+                          Chọn phương thức ảnh
+                        </Button>
+                      </Card>
+
+                      <Card className="p-5 border-2 border-green-200 bg-green-50/40">
+                        <div className="flex items-center gap-2">
+                          <Camera className="w-6 h-6 text-green-700" />
+                          <p className="text-lg font-bold text-green-700">Thu thập bằng camera</p>
+                        </div>
+                        <Button
+                          className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
+                          onClick={() => setCollectionMethod("camera")}
+                        >
+                          Chọn phương thức camera
+                        </Button>
+                      </Card>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-3 rounded-lg border p-4 bg-muted/20">
+                        <div>
+                          <p className="font-semibold">
+                            Phương thức đang dùng:{" "}
+                            <span className={collectionMethod === "image" ? "text-blue-700 font-bold" : "text-green-700 font-bold"}>
+                              {collectionMethod === "image" ? "Thu thập bằng ảnh" : "Thu thập bằng camera"}
+                            </span>
+                          </p>
+                          <p className="text-sm text-muted-foreground">Bạn có thể đổi phương thức bất kỳ lúc nào.</p>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          className="hover:bg-teal-500"
+                          onClick={() => {
+                            setCollectionMethod("none")
+                            setUploadDataUrl(null)
+                            setUploadFileName(null)
+                            setUploadError(null)
+                            setUploadPredictResult(null)
+                          }}
+                        >
+                          Đổi phương thức
+                        </Button>
+                      </div>
+                      {saveNotice && (
+                        <Alert className="mb-4 border-green-500/80 bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-100">
+                          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          <AlertDescription className="text-green-700 dark:text-green-100">
+                            {saveNotice}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {/* IMAGE UPLOAD METHOD - giữ UI cũ nhưng chạy đúng chức năng */}
+                      {collectionMethod === "image" && (
+                        <Card className="p-6 border-2 border-blue-200 bg-blue-50/30">
+                          <div className="mt-4 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-base font-bold text-foreground">Tải Ảnh Cử Chỉ Lên</h3>
+                              <Badge variant="outline" className="text-xs">
+                                Giới hạn: 10MB
+                              </Badge>
+                            </div>
+
+                            {uploadError && (
+                              <Alert variant="destructive" className="bg-red-50 dark:bg-red-950/30 border-red-200">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription className="text-sm">{uploadError}</AlertDescription>
+                              </Alert>
+                            )}
+
+                            {uploadDataUrl ? (
+                              <div className="space-y-4">
+                                <div className="relative w-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden border border-border/50 shadow-inner">
+                                  <img
+                                    src={uploadDataUrl || "/placeholder.svg"}
+                                    alt="Uploaded gesture"
+                                    className="w-full aspect-video object-contain"
+                                  />
+                                  <Button
+                                    onClick={clearUploadedImage}
+                                    size="sm"
+                                    variant="destructive"
+                                    className="absolute top-3 right-3 shadow-lg"
+                                    aria-label="Remove uploaded image"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+
                                 <Button
-                                  onClick={clearUploadedImage}
-                                  size="sm"
-                                  variant="destructive"
-                                  className="absolute top-3 right-3 shadow-lg"
-                                  aria-label="Remove uploaded image"
+                                  onClick={handleRecognizeUploadedImage}
+                                  disabled={isUploadPredicting || !uploadDataUrl}
+                                  size="lg"
+                                  className="w-full bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-white font-bold text-base h-14 shadow-md hover:shadow-lg transition-all"
                                 >
-                                  <X className="w-4 h-4" />
+                                  {isUploadPredicting ? (
+                                    <span className="flex items-center gap-2">
+                                      <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                                      Đang nhận diện...
+                                    </span>
+                                  ) : (
+                                    "Nhận Diện"
+                                  )}
+                                </Button>
+
+                                {uploadPredictResult && (
+                                  <Card className="p-4 border border-blue-200 bg-white/70 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm text-muted-foreground">Kết quả:</span>
+                                      <span className="font-bold text-blue-700">
+                                        {uploadPredictResult.has_hand === false || uploadPredictResult.gesture === "no_hand"
+                                          ? "Không thấy tay"
+                                          : `Cử chỉ ${uploadPredictResult.gesture}`}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm text-muted-foreground">Độ tin cậy:</span>
+                                      <span className="font-bold">
+                                        {(Number(uploadPredictResult.confidence || 0) * 100).toFixed(1)}%
+                                      </span>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                      <span className="text-sm text-muted-foreground">Văn bản:</span>
+                                      <div className="font-bold text-lg text-center rounded-md border p-3">
+                                        {uploadPredictResult.text || "Không xác định"}
+                                      </div>
+                                    </div>
+
+                                    {!canSaveUpload && (
+                                      <Alert>
+                                        <Info className="h-4 w-4" />
+                                        <AlertDescription>Ảnh này không thấy tay rõ nên hệ thống không cho lưu làm mẫu.</AlertDescription>
+                                      </Alert>
+                                    )}
+                                  </Card>
+                                )}
+
+                                <Button
+                                  onClick={handleSaveUploadedSample}
+                                  disabled={isSavingUpload || !uploadPredictResult || !canSaveUpload}
+                                  size="lg"
+                                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-14 shadow-md hover:shadow-lg transition-all"
+                                >
+                                  {isSavingUpload ? "Đang lưu..." : "Lưu ảnh này làm mẫu"}
                                 </Button>
                               </div>
-
-                              <Button
-                                onClick={handleRecognizeUploadedImage}
-                                disabled={isUploadPredicting || !uploadDataUrl}
-                                size="lg"
-                                className="w-full bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-white font-bold text-base h-14 shadow-md hover:shadow-lg transition-all"
-                              >
-                                {isUploadPredicting ? (
-                                  <span className="flex items-center gap-2">
-                                    <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin" />
-                                    Đang nhận diện...
-                                  </span>
-                                ) : (
-                                  "Nhận Diện"
-                                )}
-                              </Button>
-
-                              {uploadPredictResult && (
-                                <Card className="p-4 border border-blue-200 bg-white/70 space-y-3">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm text-muted-foreground">Kết quả:</span>
-                                    <span className="font-bold text-blue-700">
-                                      {uploadPredictResult.has_hand === false || uploadPredictResult.gesture === "no_hand"
-                                        ? "Không thấy tay"
-                                        : `Cử chỉ ${uploadPredictResult.gesture}`}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm text-muted-foreground">Độ tin cậy:</span>
-                                    <span className="font-bold">
-                                      {(Number(uploadPredictResult.confidence || 0) * 100).toFixed(1)}%
-                                    </span>
-                                  </div>
-
-                                  <div className="space-y-1">
-                                    <span className="text-sm text-muted-foreground">Văn bản:</span>
-                                    <div className="font-bold text-lg text-center rounded-md border p-3">
-                                      {uploadPredictResult.text || "Không xác định"}
+                            ) : (
+                              <div className="space-y-4">
+                                <input
+                                  ref={fileInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleUploadFileChange}
+                                  className="hidden"
+                                  id="image-upload"
+                                />
+                                <label
+                                  htmlFor="image-upload"
+                                  className="flex flex-col items-center justify-center w-full h-48 px-4 border-2 border-dashed border-border/50 rounded-xl cursor-pointer bg-gradient-to-br from-secondary/5 to-transparent hover:from-secondary/10 hover:to-secondary/5 transition-all group"
+                                >
+                                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                    <div className="p-3 bg-primary/10 rounded-full mb-3 group-hover:scale-110 transition-transform">
+                                      <Upload className="w-8 h-8 text-primary" />
                                     </div>
+                                    <p className="mb-2 text-base font-semibold text-foreground">Nhấp để tải ảnh lên hoặc kéo thả vào đây</p>
+                                    <p className="text-sm text-muted-foreground">PNG, JPG, JPEG (tối đa 5MB)</p>
                                   </div>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      )}
 
-                                  {!canSaveUpload && (
-                                    <Alert>
-                                      <Info className="h-4 w-4" />
-                                      <AlertDescription>Ảnh này không thấy tay rõ nên hệ thống không cho lưu làm mẫu.</AlertDescription>
-                                    </Alert>
-                                  )}
-                                </Card>
-                              )}
-
-                              <Button
-                                onClick={handleSaveUploadedSample}
-                                disabled={isSavingUpload || !uploadPredictResult || !canSaveUpload}
-                                size="lg"
-                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-14 shadow-md hover:shadow-lg transition-all"
-                              >
-                                {isSavingUpload ? "Đang lưu..." : "Lưu ảnh này làm mẫu"}
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="space-y-4">
-                              <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*"
-                                onChange={handleUploadFileChange}
-                                className="hidden"
-                                id="image-upload"
-                              />
-                              <label
-                                htmlFor="image-upload"
-                                className="flex flex-col items-center justify-center w-full h-48 px-4 border-2 border-dashed border-border/50 rounded-xl cursor-pointer bg-gradient-to-br from-secondary/5 to-transparent hover:from-secondary/10 hover:to-secondary/5 transition-all group"
-                              >
-                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                  <div className="p-3 bg-primary/10 rounded-full mb-3 group-hover:scale-110 transition-transform">
-                                    <Upload className="w-8 h-8 text-primary" />
-                                  </div>
-                                  <p className="mb-2 text-base font-semibold text-foreground">Nhấp để tải ảnh lên hoặc kéo thả vào đây</p>
-                                  <p className="text-sm text-muted-foreground">PNG, JPG, JPEG (tối đa 5MB)</p>
-                                </div>
-                              </label>
-                            </div>
-                          )}
-                        </div>
-                      </Card>
-                    )}
-
-                    {/* CAMERA METHOD (giữ nguyên) */}
-                    {/* {collectionMethod === "camera" && (
+                      {/* CAMERA METHOD (giữ nguyên) */}
+                      {/* {collectionMethod === "camera" && (
                       <Card className="p-6 border-2 border-green-200 bg-green-50/30 space-y-4">
                         <div className="space-y-1">
                           <p className="text-lg font-bold text-green-700">Chụp từ camera để thu thập</p>
@@ -1470,85 +1607,85 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
                         )}
                       </Card>
                     )} */}
-                    {collectionMethod === "camera" && (
-                      <Card className="p-6 border-2 border-green-200 bg-green-50/30 space-y-4">
-                        <div className="space-y-1">
-                          <p className="text-lg font-bold text-green-700">Chụp từ camera để thu thập</p>
-                          <p className="text-sm text-green-700/80">
-                            Chọn nhãn → giơ tay đúng cử chỉ → bấm “Lưu mẫu”. Hệ thống chỉ lưu khi thấy tay rõ và đủ độ tin cậy.
-                          </p>
-                        </div>
-
-                        {/* error riêng cho collect */}
-                        {collectError && (
-                          <Alert variant="destructive" className="bg-red-50 dark:bg-red-950/30 border-red-200">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertDescription className="text-sm">{collectError}</AlertDescription>
-                          </Alert>
-                        )}
-
-                        {/* Chọn nhãn cần thu thập */}
-                        <div className="space-y-2">
-                          <p className="font-semibold text-green-800">
-                            Nhãn đang thu thập: <span className="font-bold">{selectedGestureForCollection}</span>{" "}
-                            <span className="text-sm text-muted-foreground">
-                              (hiện có {collectedSamples[selectedGestureForCollection] || 0} mẫu)
-                            </span>
-                          </p>
-
-                          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                            {gestureList.map((g) => {
-                              const id = String(g.id)
-                              const active = id === String(selectedGestureForCollection)
-                              return (
-                                <Button
-                                  key={id}
-                                  type="button"
-                                  variant={active ? "default" : "outline"}
-                                  className={active ? "bg-green-600 hover:bg-green-700" : ""}
-                                  onClick={() => setSelectedGestureForCollection(id)}
-                                  disabled={isCollecting}
-                                >
-                                  {id}
-                                </Button>
-                              )
-                            })}
+                      {collectionMethod === "camera" && (
+                        <Card className="p-6 border-2 border-green-200 bg-green-50/30 space-y-4">
+                          <div className="space-y-1">
+                            <p className="text-lg font-bold text-green-700">Chụp từ camera để thu thập</p>
+                            <p className="text-sm text-green-700/80">
+                              Chọn nhãn → giơ tay đúng cử chỉ → bấm “Lưu mẫu”. Hệ thống chỉ lưu khi thấy tay rõ và đủ độ tin cậy.
+                            </p>
                           </div>
-                        </div>
 
-                        {/* Chọn batch size */}
-                        <div className="space-y-2">
-                          <p className="font-semibold text-green-800">Số mẫu mỗi lần lưu</p>
-                          <div className="flex gap-2 flex-wrap">
-                            {([1, 5, 10] as const).map((n) => {
-                              const active = n === collectBatchSize
-                              return (
-                                <Button
-                                  key={n}
-                                  type="button"
-                                  variant={active ? "default" : "outline"}
-                                  className={active ? "bg-green-600 hover:bg-green-700" : ""}
-                                  onClick={() => setCollectBatchSize(n)}
-                                  disabled={isCollecting}
-                                >
-                                  {n} mẫu
-                                </Button>
-                              )
-                            })}
+                          {/* error riêng cho collect */}
+                          {collectError && (
+                            <Alert variant="destructive" className="bg-red-50 dark:bg-red-950/30 border-red-200">
+                              <AlertCircle className="h-4 w-4" />
+                              <AlertDescription className="text-sm">{collectError}</AlertDescription>
+                            </Alert>
+                          )}
+
+                          {/* Chọn nhãn cần thu thập */}
+                          <div className="space-y-2">
+                            <p className="font-semibold text-green-800">
+                              Nhãn đang thu thập: <span className="font-bold">{selectedGestureForCollection}</span>{" "}
+                              <span className="text-sm text-muted-foreground">
+                                (hiện có {collectedSamples[selectedGestureForCollection] || 0} mẫu)
+                              </span>
+                            </p>
+
+                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                              {gestureList.map((g) => {
+                                const id = String(g.id)
+                                const active = id === String(selectedGestureForCollection)
+                                return (
+                                  <Button
+                                    key={id}
+                                    type="button"
+                                    variant={active ? "default" : "outline"}
+                                    className={active ? "bg-green-600 hover:bg-green-700" : ""}
+                                    onClick={() => setSelectedGestureForCollection(id)}
+                                    disabled={isCollecting}
+                                  >
+                                    {id}
+                                  </Button>
+                                )
+                              })}
+                            </div>
                           </div>
-                        </div>
 
-                        {/* Progress */}
-                        {isCollecting && collectProgress && (
-                          <Alert className="border-blue-300 bg-blue-50">
-                            <Info className="h-4 w-4" />
-                            <AlertDescription className="text-sm">
-                              Đang thu thập... đã lưu {collectProgress.saved}/{collectProgress.tried} (mục tiêu {collectBatchSize})
-                            </AlertDescription>
-                          </Alert>
-                        )}
+                          {/* Chọn batch size */}
+                          <div className="space-y-2">
+                            <p className="font-semibold text-green-800">Số mẫu mỗi lần lưu</p>
+                            <div className="flex gap-2 flex-wrap">
+                              {([1, 5, 10] as const).map((n) => {
+                                const active = n === collectBatchSize
+                                return (
+                                  <Button
+                                    key={n}
+                                    type="button"
+                                    variant={active ? "default" : "outline"}
+                                    className={active ? "bg-green-600 hover:bg-green-700" : ""}
+                                    onClick={() => setCollectBatchSize(n)}
+                                    disabled={isCollecting}
+                                  >
+                                    {n} mẫu
+                                  </Button>
+                                )
+                              })}
+                            </div>
+                          </div>
 
-                        {/* <Button
+                          {/* Progress */}
+                          {isCollecting && collectProgress && (
+                            <Alert className="border-blue-300 bg-blue-50">
+                              <Info className="h-4 w-4" />
+                              <AlertDescription className="text-sm">
+                                Đang thu thập... đã lưu {collectProgress.saved}/{collectProgress.tried} (mục tiêu {collectBatchSize})
+                              </AlertDescription>
+                            </Alert>
+                          )}
+
+                          {/* <Button
                           onClick={handleCollectSample}
                           className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
                           disabled={!isStreamActive || isCollecting}
@@ -1556,47 +1693,48 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
                           {isCollecting ? "Đang lưu..." : `Lưu ${collectBatchSize} mẫu từ camera`}
                         </Button> */}
 
-                        <p className="text-sm text-muted-foreground">{handHint}</p>
+                          <p className="text-sm text-muted-foreground">{handHint}</p>
 
-                        <Button
-                          onClick={handleCollectSample}
-                          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
-                          disabled={!isStreamActive || !canSaveCamera || isCollecting}
-                        >
-                          {isCollecting
-                            ? `Đang lưu... ${collectProgress?.saved ?? 0}/${collectBatchSize}`
-                            : `Lưu ${collectBatchSize} mẫu`}
-                        </Button>
-
-
-
-                        {!isStreamActive && (
-                          <Alert>
-                            <Info className="h-4 w-4" />
-                            <AlertDescription>Camera chưa bật. Hãy khởi động camera ở phần trên trước khi lưu mẫu.</AlertDescription>
-                          </Alert>
-                        )}
-                      </Card>
-                    )}
+                          <Button
+                            onClick={handleCollectSample}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-6"
+                            disabled={!isStreamActive || !canSaveCamera || isCollecting}
+                          >
+                            {isCollecting
+                              ? `Đang lưu... ${collectProgress?.saved ?? 0}/${collectBatchSize}`
+                              : `Lưu ${collectBatchSize} mẫu`}
+                          </Button>
 
 
-                    <div className="grid grid-cols-3 gap-2">
-                      {gestureList.map((gesture) => (
-                        <div key={gesture.id} className="text-center p-3 bg-primary/5 rounded-lg border border-primary/20">
-                          <p className="text-lg font-bold text-primary">{gesture.id}</p>
-                          <p className="text-xs text-muted-foreground mb-1">{gesture.text}</p>
-                          <p className="text-2xl font-bold text-accent">{collectedSamples[gesture.id] || 0}</p>
-                          <p className="text-xs text-muted-foreground">mẫu</p>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+
+                          {!isStreamActive && (
+                            <Alert>
+                              <Info className="h-4 w-4" />
+                              <AlertDescription>Camera chưa bật. Hãy khởi động camera ở phần trên trước khi lưu mẫu.</AlertDescription>
+                            </Alert>
+                          )}
+                        </Card>
+                      )}
+
+
+                      <div className="grid grid-cols-3 gap-2">
+                        {gestureList.map((gesture) => (
+                          <div key={gesture.id} className="text-center p-3 bg-primary/5 rounded-lg border border-primary/20">
+                            <p className="text-lg font-bold text-primary">{gesture.id}</p>
+                            <p className="text-xs text-muted-foreground mb-1">{gesture.text}</p>
+                            <p className="text-2xl font-bold text-accent">{collectedSamples[gesture.id] || 0}</p>
+                            <p className="text-xs text-muted-foreground">mẫu</p>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </>
   )
 }

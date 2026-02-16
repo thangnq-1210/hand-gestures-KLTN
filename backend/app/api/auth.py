@@ -44,6 +44,8 @@ def login(user_in: UserLogin, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sai email hoặc mật khẩu",
         )
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa")
 
     if not verify_password(user_in.password, user.password_hash):
         raise HTTPException(
@@ -83,14 +85,6 @@ def login_for_swagger(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint dành cho OAuth2 password flow (Swagger UI).
-
-    Swagger sẽ gửi:
-    - username: bạn dùng như email
-    - password: mật khẩu
-    Dữ liệu là form (x-www-form-urlencoded), KHÔNG PHẢI JSON.
-    """
     # form_data.username = email
     user = authenticate_user(db, email=form_data.username, password=form_data.password)
     if not user:

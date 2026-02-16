@@ -21,5 +21,5 @@ class GestureSample(Base):
     image_path = Column(Text, nullable=False)
     source = Column(String(50), nullable=False, default="manual_collect")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
+    trained_at = Column(DateTime, nullable=True, default=None)
     user = relationship("User", back_populates="gesture_samples")

@@ -1,0 +1,21 @@
+🏃 View run treasured-doe-823 at: http://127.0.0.1:5000/#/experiments/1/runs/b40a095671244d6f8175363829efbbd3
+🧪 View experiment at: http://127.0.0.1:5000/#/experiments/1
+Traceback (most recent call last):
+  File "D:\Work\FIT\KLTN\hand-gestures-KLTN\backend\train\train_mlflow.py", line 328, in <module>
+    main(args.manifest, args.ids, args.out_metadata)
+  File "D:\Work\FIT\KLTN\hand-gestures-KLTN\backend\train\train_mlflow.py", line 222, in main
+    for x, y in train_loader:
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\torch\utils\data\dataloader.py", line 734, in __next__
+    data = self._next_data()
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\torch\utils\data\dataloader.py", line 790, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\torch\utils\data\_utils\fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\torch\utils\data\_utils\fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "D:\Work\FIT\KLTN\hand-gestures-KLTN\backend\train\train_mlflow.py", line 54, in __getitem__
+    img = Image.open(row["path"]).convert("RGB")
+  File "C:\Users\ACER\PycharmProjects\PythonProject\.venv\lib\site-packages\PIL\Image.py", line 3513, in open
+    fp = builtins.open(filename, "rb")
+FileNotFoundError: [Errno 2] No such file or directory: 'user_samples/3/1/20251226_003746_415829.jpg'
+[0m

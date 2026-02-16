@@ -528,7 +528,6 @@ export default function GesturesPage() {
               </DialogContent>
             </Dialog>
 
-
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" className="w-full bg-transparent" disabled={isLoading}>

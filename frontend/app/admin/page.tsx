@@ -11,11 +11,11 @@ import AdminUsers from "@/components/admin/admin-users"
 import AdminSettings from "@/components/admin/admin-settings"
 import AdminDataCollection from "@/components/admin/admin-data-collection"
 import AdminSystemStatus from "@/components/admin/admin-system-status"
-
+import { useState, useEffect } from "react"
 export default function AdminPage() {
-  const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, token } = useAuth()
   const router = useRouter()
-
+  const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000"
   if (!isAuthenticated) {
     router.push("/login")
     return null
@@ -37,6 +37,38 @@ export default function AdminPage() {
       </main>
     )
   }
+
+  type Overview = {
+    total_users: number
+    users_added_7d: number
+    active_users_24h: number
+    predictions_24h: number
+    error_rate_pct: number
+    as_of: string
+  }
+
+  const [overview, setOverview] = useState<Overview | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!token || user?.role !== "admin") return
+    const run = async () => {
+      setLoading(true)
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/overview`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) throw new Error(await res.text())
+        setOverview(await res.json())
+      } catch (e) {
+        console.error("overview fetch failed:", e)
+        setOverview(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+    run()
+  }, [token, user?.role])
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
@@ -76,15 +108,21 @@ export default function AdminPage() {
               <Card className="border-2 border-primary/20 p-6">
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Tổng Người Dùng</p>
-                  <p className="text-4xl font-bold text-primary">12</p>
-                  <p className="text-xs text-muted-foreground">Tăng 2 tuần này</p>
+                  <p className="text-4xl font-bold text-primary">
+                    {overview ? overview.total_users : (loading ? "..." : "0")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Tăng {overview ? overview.users_added_7d : 0} tuần này
+                  </p>
                 </div>
               </Card>
 
               <Card className="border-2 border-secondary/20 p-6">
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Người Dùng Hoạt Động</p>
-                  <p className="text-4xl font-bold text-secondary">8</p>
+                  <p className="text-4xl font-bold text-secondary">
+                    {overview ? overview.active_users_24h : (loading ? "..." : "0")}
+                  </p>
                   <p className="text-xs text-muted-foreground">Trong 24 giờ qua</p>
                 </div>
               </Card>
@@ -92,16 +130,20 @@ export default function AdminPage() {
               <Card className="border-2 border-accent/20 p-6">
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Tổng Lần Dự Đoán</p>
-                  <p className="text-4xl font-bold text-accent">1,248</p>
-                  <p className="text-xs text-muted-foreground">Hôm nay</p>
+                  <p className="text-4xl font-bold text-accent">
+                    {overview ? overview.predictions_24h.toLocaleString() : (loading ? "..." : "0")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">24 giờ qua</p>
                 </div>
               </Card>
 
               <Card className="border-2 border-green-500/20 p-6">
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Tỷ Lệ Lỗi</p>
-                  <p className="text-4xl font-bold text-green-500">2.1%</p>
-                  <p className="text-xs text-muted-foreground">Dựa trên feedback</p>
+                  <p className="text-4xl font-bold text-green-500">
+                    {overview ? `${overview.error_rate_pct}%` : (loading ? "..." : "0%")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">no_hand / tổng logs (24h)</p>
                 </div>
               </Card>
             </div>

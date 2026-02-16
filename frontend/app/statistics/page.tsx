@@ -36,7 +36,7 @@ interface TimeStats {
 }
 
 export default function StatisticsPage() {
-  const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, token } = useAuth()
   const router = useRouter()
   const [gestureStats, setGestureStats] = useState<GestureStats[]>([])
   const pieData = gestureStats.map((g) => ({
@@ -46,40 +46,78 @@ export default function StatisticsPage() {
   const [timeStats, setTimeStats] = useState<TimeStats[]>([])
   const [totalPredictions, setTotalPredictions] = useState(0)
   const [mostUsedGesture, setMostUsedGesture] = useState("")
+  const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000"
+  type StatsSummary = {
+    gesture_stats: { gesture: string; count: number }[]
+    time_stats: { time: string; predictions: number }[]
+    total_predictions: number
+    most_used_gesture: string
+    days: number
+  }
+  // useEffect(() => {
+  //   if (!isAuthenticated) {
+  //     router.push("/login")
+  //     return
+  //   }
 
+  //   // Mock statistics data
+  //   const mockGestureStats: GestureStats[] = [
+  //     { gesture: "Xin chào", count: 45 },
+  //     { gesture: "Cảm ơn", count: 38 },
+  //     { gesture: "Tôi cần giúp đỡ", count: 32 },
+  //     { gesture: "Vâng", count: 28 },
+  //     { gesture: "Không", count: 22 },
+  //     { gesture: "Tôi đang đau", count: 18 },
+  //   ]
+
+  //   const mockTimeStats: TimeStats[] = [
+  //     { time: "00:00", predictions: 2 },
+  //     { time: "03:00", predictions: 5 },
+  //     { time: "06:00", predictions: 12 },
+  //     { time: "09:00", predictions: 28 },
+  //     { time: "12:00", predictions: 35 },
+  //     { time: "15:00", predictions: 42 },
+  //     { time: "18:00", predictions: 38 },
+  //     { time: "21:00", predictions: 25 },
+  //     { time: "23:59", predictions: 8 },
+  //   ]
+
+  //   setGestureStats(mockGestureStats)
+  //   setTimeStats(mockTimeStats)
+  //   setTotalPredictions(mockGestureStats.reduce((sum, g) => sum + g.count, 0))
+  //   setMostUsedGesture(mockGestureStats[0].gesture)
+  // }, [isAuthenticated, router])
   useEffect(() => {
     if (!isAuthenticated) {
       router.push("/login")
       return
     }
+    if (!token) return
 
-    // Mock statistics data
-    const mockGestureStats: GestureStats[] = [
-      { gesture: "Xin chào", count: 45 },
-      { gesture: "Cảm ơn", count: 38 },
-      { gesture: "Tôi cần giúp đỡ", count: 32 },
-      { gesture: "Vâng", count: 28 },
-      { gesture: "Không", count: 22 },
-      { gesture: "Tôi đang đau", count: 18 },
-    ]
+    const run = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/stats/summary?days=7`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const data = await res.json()
 
-    const mockTimeStats: TimeStats[] = [
-      { time: "00:00", predictions: 2 },
-      { time: "03:00", predictions: 5 },
-      { time: "06:00", predictions: 12 },
-      { time: "09:00", predictions: 28 },
-      { time: "12:00", predictions: 35 },
-      { time: "15:00", predictions: 42 },
-      { time: "18:00", predictions: 38 },
-      { time: "21:00", predictions: 25 },
-      { time: "23:59", predictions: 8 },
-    ]
+        setGestureStats(data.gesture_stats ?? [])
+        setTimeStats(data.time_stats ?? [])
+        setTotalPredictions(data.total_predictions ?? 0)
+        setMostUsedGesture(data.most_used_gesture ?? "")
+      } catch (e) {
+        console.error("stats fetch failed:", e)
+        setGestureStats([])
+        setTimeStats([])
+        setTotalPredictions(0)
+        setMostUsedGesture("")
+      }
+    }
 
-    setGestureStats(mockGestureStats)
-    setTimeStats(mockTimeStats)
-    setTotalPredictions(mockGestureStats.reduce((sum, g) => sum + g.count, 0))
-    setMostUsedGesture(mockGestureStats[0].gesture)
-  }, [isAuthenticated, router])
+    run()
+  }, [isAuthenticated, router, token])
+
 
   const COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"]
 
@@ -135,7 +173,7 @@ export default function StatisticsPage() {
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm text-muted-foreground mb-2">Thời Gian Hoạt Động</p>
-                <p className="text-2xl font-bold text-green-600">18 giờ</p>
+                <p className="text-2xl font-bold text-green-600">3 giờ</p>
               </div>
               <Clock className="w-8 h-8 text-green-500/50" />
             </div>
@@ -266,7 +304,7 @@ export default function StatisticsPage() {
 
           {/* Details Tab */}
           <TabsContent value="details" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
               <Card className="border-2 border-primary/20 p-6">
                 <h2 className="text-xl font-bold text-primary mb-4">Thống Kê Cá Nhân</h2>
                 <div className="space-y-3">
@@ -293,28 +331,6 @@ export default function StatisticsPage() {
                         ? user.createdAt.toLocaleDateString("vi-VN")
                         : new Date(user.createdAt).toLocaleDateString("vi-VN")}
                     </span>
-                  </div>
-                </div>
-              </Card>
-
-              <Card className="border-2 border-primary/20 p-6">
-                <h2 className="text-xl font-bold text-primary mb-4">Xu Hướng</h2>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center p-3 bg-secondary/5 rounded">
-                    <span className="text-muted-foreground">Tăng trưởng tuần này</span>
-                    <span className="font-semibold text-green-600">+12%</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 bg-secondary/5 rounded">
-                    <span className="text-muted-foreground">Tăng trưởng tháng này</span>
-                    <span className="font-semibold text-green-600">+34%</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 bg-secondary/5 rounded">
-                    <span className="text-muted-foreground">Cử chỉ mới nhất</span>
-                    <span className="font-semibold text-foreground">Xin chào</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 bg-secondary/5 rounded">
-                    <span className="text-muted-foreground">Lần cuối sử dụng</span>
-                    <span className="font-semibold text-foreground">Hôm nay 16:30</span>
                   </div>
                 </div>
               </Card>
