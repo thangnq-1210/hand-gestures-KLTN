@@ -1,7 +1,8 @@
 "use client"
 
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
+import ProtectedPage from "@/components/auth/protected-page"
+import { Button } from "@/components/ui/button"
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,15 +21,13 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts"
-import { TrendingUp, Calendar, Clock, Zap } from "lucide-react"
+import { TrendingUp, Calendar, Clock, Zap, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 
 interface GestureStats {
   gesture: string
   count: number
 }
-
-
 
 interface TimeStats {
   time: string
@@ -37,7 +36,6 @@ interface TimeStats {
 
 export default function StatisticsPage() {
   const { user, isAuthenticated, token } = useAuth()
-  const router = useRouter()
   const [gestureStats, setGestureStats] = useState<GestureStats[]>([])
   const pieData = gestureStats.map((g) => ({
     name: g.gesture,
@@ -54,45 +52,13 @@ export default function StatisticsPage() {
     most_used_gesture: string
     days: number
   }
-  // useEffect(() => {
-  //   if (!isAuthenticated) {
-  //     router.push("/login")
-  //     return
-  //   }
 
-  //   // Mock statistics data
-  //   const mockGestureStats: GestureStats[] = [
-  //     { gesture: "Xin chào", count: 45 },
-  //     { gesture: "Cảm ơn", count: 38 },
-  //     { gesture: "Tôi cần giúp đỡ", count: 32 },
-  //     { gesture: "Vâng", count: 28 },
-  //     { gesture: "Không", count: 22 },
-  //     { gesture: "Tôi đang đau", count: 18 },
-  //   ]
-
-  //   const mockTimeStats: TimeStats[] = [
-  //     { time: "00:00", predictions: 2 },
-  //     { time: "03:00", predictions: 5 },
-  //     { time: "06:00", predictions: 12 },
-  //     { time: "09:00", predictions: 28 },
-  //     { time: "12:00", predictions: 35 },
-  //     { time: "15:00", predictions: 42 },
-  //     { time: "18:00", predictions: 38 },
-  //     { time: "21:00", predictions: 25 },
-  //     { time: "23:59", predictions: 8 },
-  //   ]
-
-  //   setGestureStats(mockGestureStats)
-  //   setTimeStats(mockTimeStats)
-  //   setTotalPredictions(mockGestureStats.reduce((sum, g) => sum + g.count, 0))
-  //   setMostUsedGesture(mockGestureStats[0].gesture)
-  // }, [isAuthenticated, router])
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push("/login")
-      return
-    }
-    if (!token) return
+    // if (!isAuthenticated) {
+    //   router.push("/login")
+    //   return
+    // }
+    // if (!token) return
 
     const run = async () => {
       try {
@@ -116,7 +82,7 @@ export default function StatisticsPage() {
     }
 
     run()
-  }, [isAuthenticated, router, token])
+  }, [isAuthenticated, token])
 
 
   const COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"]
@@ -126,11 +92,21 @@ export default function StatisticsPage() {
   }
 
   return (
+    <ProtectedPage allowRoles={["user", "caregiver", "admin"]}>
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        <Link href="/" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
 
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-primary mb-2">Thống Kê Sử Dụng</h1>
@@ -339,5 +315,6 @@ export default function StatisticsPage() {
         </Tabs>
       </div>
     </main>
+    </ProtectedPage>
   )
 }

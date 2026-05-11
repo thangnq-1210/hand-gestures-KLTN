@@ -21,11 +21,11 @@ export default function LandingPage() {
             <div className="space-y-6">
               <p className="text-teal-400 font-semibold text-base">Hệ thống</p>
               <h1 className="text-5xl md:text-6xl font-bold leading-tight text-white">
-                Nhận Diện Cử Chỉ Tay Hỗ Trợ Người Khiếm Khuyết
+                Nhận Diện Cử Chỉ Tay Hỗ Trợ Người Khiếm Ngôn
               </h1>
               <p className="text-lg text-slate-300 leading-relaxed">
                 Công nghệ AI tiên tiến chuyển đổi cử chỉ tay thành văn bản và giọng nói tự nhiên. Hỗ trợ giao tiếp hiệu
-                quả cho 230,000+ người khiếm khuyết tại Việt Nam.
+                quả cho 230,000+ người khiếm ngôn tại Việt Nam.
               </p>
             </div>
 
@@ -86,7 +86,7 @@ export default function LandingPage() {
             </div>
             <h2 className="text-5xl font-bold text-foreground">Công nghệ tiên tiến cho bạn</h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              Tất cả công cụ bạn cần để giao tiếp hiệu quả, được thiết kế đặc biệt cho người khiếm khuyết
+              Tất cả công cụ bạn cần để giao tiếp hiệu quả, được thiết kế đặc biệt cho người khiếm ngôn
             </p>
           </div>
 
@@ -109,7 +109,7 @@ export default function LandingPage() {
               {
                 icon: Accessibility,
                 title: "Hỗ Trợ Tiếp Cận Toàn Diện",
-                description: "Tùy chỉnh giao diện cho người khiếm khuyết, hỗ trợ 4 mức độ tiếp cận khác nhau",
+                description: "Tùy chỉnh giao diện cho người khiếm ngôn, hỗ trợ 4 mức độ tiếp cận khác nhau",
                 color: "accent",
               },
               {
@@ -195,9 +195,9 @@ export default function LandingPage() {
                 icon: CheckCircle2,
               },
               {
-                title: "Hỗ Trợ Người Khiếm Khuyết",
+                title: "Hỗ Trợ Người Khiếm Ngôn",
                 description:
-                  "Thiết kế đặc biệt cho người khiếm khuyết thính, khiếm khuyết vận động, khiếm khuyết nhận thức",
+                  "Thiết kế đặc biệt cho người khiếm ngôn, bệnh nhân đột quỵ, khó khăn trong giao tiếp",
                 icon: Accessibility,
               },
               {
@@ -318,7 +318,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="border-t border-border pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-muted-foreground text-sm">
-            <p>&copy; 2025 V - HAND. Hệ thống nhận diện cử chỉ tay hỗ trợ người khiếm khuyết</p>
+            <p>&copy; 2025 V - HAND. Hệ thống nhận diện cử chỉ tay hỗ trợ người khiếm ngôn</p>
             <p>Được xây dựng với mong muốn mang lại giá trị tích cực cho xã hội.</p>
           </div>
         </div>

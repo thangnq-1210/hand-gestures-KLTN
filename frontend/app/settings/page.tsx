@@ -1,8 +1,8 @@
 "use client"
 
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
+import ProtectedPage from "@/components/auth/protected-page"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -10,7 +10,7 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Zap, Volume2, Palette, AlertCircle } from "lucide-react"
+import { Zap, Volume2, Palette, AlertCircle, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -33,7 +33,6 @@ interface AudioSettings {
 
 export default function SettingsPage() {
   const { user, isAuthenticated, updateProfile } = useAuth()
-  const router = useRouter()
   const [uiSettings, setUiSettings] = useState<UISettings>({
     theme: "system",
     fontSize: 1,
@@ -53,10 +52,10 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push("/login")
-      return
-    }
+    // if (!isAuthenticated) {
+    //   router.push("/login")
+    //   return
+    // }
 
     // Load settings from localStorage
     const savedUISettings = localStorage.getItem("ui_settings")
@@ -71,7 +70,7 @@ export default function SettingsPage() {
     if (user?.disabilityLevel) {
       setDisabilityProfile(user.disabilityLevel)
     }
-  }, [user, isAuthenticated, router])
+  }, [user, isAuthenticated])
 
   const saveUISettings = (settings: UISettings) => {
     setUiSettings(settings)
@@ -159,11 +158,21 @@ export default function SettingsPage() {
   }
 
   return (
+    <ProtectedPage allowRoles={["user", "caregiver", "admin"]}>
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
-        <Link href="/" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
 
         <h1 className="text-4xl font-bold text-primary mb-2">Cài Đặt Tiếp Cận</h1>
         <p className="text-muted-foreground mb-8">Tùy chỉnh giao diện và âm thanh để phù hợp với nhu cầu của bạn</p>
@@ -187,9 +196,8 @@ export default function SettingsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card
-                className={`border-2 p-6 cursor-pointer transition-all ${
-                  disabilityProfile === "none" ? "border-primary bg-primary/5" : "border-border"
-                }`}
+                className={`border-2 p-6 cursor-pointer transition-all ${disabilityProfile === "none" ? "border-primary bg-primary/5" : "border-border"
+                  }`}
                 onClick={() => handleApplyProfile("light")}
               >
                 <h3 className="text-xl font-bold text-primary mb-3">Không Cần Hỗ Trợ</h3>
@@ -200,9 +208,8 @@ export default function SettingsPage() {
               </Card>
 
               <Card
-                className={`border-2 p-6 cursor-pointer transition-all ${
-                  disabilityProfile === "light" ? "border-primary bg-primary/5" : "border-border"
-                }`}
+                className={`border-2 p-6 cursor-pointer transition-all ${disabilityProfile === "light" ? "border-primary bg-primary/5" : "border-border"
+                  }`}
                 onClick={() => handleApplyProfile("light")}
               >
                 <h3 className="text-xl font-bold text-primary mb-3">Hỗ Trợ Nhẹ</h3>
@@ -217,9 +224,8 @@ export default function SettingsPage() {
               </Card>
 
               <Card
-                className={`border-2 p-6 cursor-pointer transition-all ${
-                  disabilityProfile === "moderate" ? "border-primary bg-primary/5" : "border-border"
-                }`}
+                className={`border-2 p-6 cursor-pointer transition-all ${disabilityProfile === "moderate" ? "border-primary bg-primary/5" : "border-border"
+                  }`}
                 onClick={() => handleApplyProfile("moderate")}
               >
                 <h3 className="text-xl font-bold text-primary mb-3">Hỗ Trợ Trung Bình</h3>
@@ -236,9 +242,8 @@ export default function SettingsPage() {
               </Card>
 
               <Card
-                className={`border-2 p-6 cursor-pointer transition-all ${
-                  disabilityProfile === "severe" ? "border-primary bg-primary/5" : "border-border"
-                }`}
+                className={`border-2 p-6 cursor-pointer transition-all ${disabilityProfile === "severe" ? "border-primary bg-primary/5" : "border-border"
+                  }`}
                 onClick={() => handleApplyProfile("severe")}
               >
                 <h3 className="text-xl font-bold text-primary mb-3">Hỗ Trợ Nặng</h3>
@@ -490,5 +495,6 @@ export default function SettingsPage() {
         </Tabs>
       </div>
     </main>
+    </ProtectedPage>
   )
 }

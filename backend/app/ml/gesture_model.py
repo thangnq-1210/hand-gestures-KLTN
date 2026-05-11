@@ -85,18 +85,54 @@ def preprocess_from_cv2(frame_bgr: np.ndarray) -> torch.Tensor:
     tensor = transform_infer(pil_img).unsqueeze(0)
     return tensor
 
-def get_hand_bbox_from_mediapipe(frame_bgr, hands):
-    h, w = frame_bgr.shape[:2]
+# def get_hand_bbox_from_mediapipe(frame_bgr, hands):
+#     h, w = frame_bgr.shape[:2]
+#
+#     # Mediapipe dùng RGB
+#     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+#     results = hands.process(frame_rgb)
+#
+#     if not results.multi_hand_landmarks:
+#         return None
+#
+#     # Lấy bàn tay đầu tiên
+#     hand_landmarks = results.multi_hand_landmarks[0]
+#
+#     xs = [lm.x for lm in hand_landmarks.landmark]
+#     ys = [lm.y for lm in hand_landmarks.landmark]
+#
+#     x_min = min(xs) * w
+#     x_max = max(xs) * w
+#     y_min = min(ys) * h
+#     y_max = max(ys) * h
+#
+#     # mở rộng box
+#     margin = 0.2
+#     box_w = x_max - x_min
+#     box_h = y_max - y_min
+#
+#     x_min = int(max(0, x_min - margin * box_w))
+#     y_min = int(max(0, y_min - margin * box_h))
+#     x_max = int(min(w, x_max + margin * box_w))
+#     y_max = int(min(h, y_max + margin * box_h))
+#
+#     if x_max <= x_min or y_max <= y_min:
+#         return None
+#
+#     return x_min, y_min, x_max, y_max
 
-    # Mediapipe dùng RGB
+def detect_hand(frame_bgr, hands):
+    h, w = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     results = hands.process(frame_rgb)
 
     if not results.multi_hand_landmarks:
         return None
 
-    # Lấy bàn tay đầu tiên
     hand_landmarks = results.multi_hand_landmarks[0]
+    handedness = None
+    if results.multi_handedness:
+        handedness = results.multi_handedness[0].classification[0].label
 
     xs = [lm.x for lm in hand_landmarks.landmark]
     ys = [lm.y for lm in hand_landmarks.landmark]
@@ -106,7 +142,6 @@ def get_hand_bbox_from_mediapipe(frame_bgr, hands):
     y_min = min(ys) * h
     y_max = max(ys) * h
 
-    # mở rộng box
     margin = 0.2
     box_w = x_max - x_min
     box_h = y_max - y_min
@@ -119,21 +154,43 @@ def get_hand_bbox_from_mediapipe(frame_bgr, hands):
     if x_max <= x_min or y_max <= y_min:
         return None
 
-    return x_min, y_min, x_max, y_max
+    return (x_min, y_min, x_max, y_max), hand_landmarks, handedness
 
 # 4. Hàm core: dự đoán từ 1 frame BGR (OpenCV)
+# def predict_from_bgr(frame_bgr: np.ndarray, use_static_detector: bool = True):
+#     """
+#     Nhận frame BGR (ảnh đã đọc bằng cv2), trả về (label, prob, has_hand).
+#     Dùng Mediapipe để crop tay nếu phát hiện được.
+#     """
+#     hands = hands_static if use_static_detector else hands_detector
+#
+#     bbox = get_hand_bbox_from_mediapipe(frame_bgr, hands)
+#
+#     if bbox is None:
+#         return "no_hand", 0.0, False
+#
+#     x1, y1, x2, y2 = bbox
+#     hand_bgr = frame_bgr[y1:y2, x1:x2]
+#
+#     input_tensor = preprocess_from_cv2(hand_bgr).to(DEVICE)
+#
+#     with torch.no_grad():
+#         logits = model(input_tensor)
+#         probs = F.softmax(logits, dim=1)[0]
+#         pred_idx = int(torch.argmax(probs).item())
+#         pred_prob = float(probs[pred_idx].item())
+#
+#     label = CLASS_NAMES[pred_idx]
+#     return label, pred_prob, True
+
 def predict_from_bgr(frame_bgr: np.ndarray, use_static_detector: bool = True):
-    """
-    Nhận frame BGR (ảnh đã đọc bằng cv2), trả về (label, prob, has_hand).
-    Dùng Mediapipe để crop tay nếu phát hiện được.
-    """
     hands = hands_static if use_static_detector else hands_detector
 
-    bbox = get_hand_bbox_from_mediapipe(frame_bgr, hands)
-
-    if bbox is None:
+    detected = detect_hand(frame_bgr, hands)
+    if detected is None:
         return "no_hand", 0.0, False
 
+    bbox, hand_landmarks, handedness = detected
     x1, y1, x2, y2 = bbox
     hand_bgr = frame_bgr[y1:y2, x1:x2]
 
@@ -146,6 +203,12 @@ def predict_from_bgr(frame_bgr: np.ndarray, use_static_detector: bool = True):
         pred_prob = float(probs[pred_idx].item())
 
     label = CLASS_NAMES[pred_idx]
+
+    # Rule sửa lỗi cụm 2-3-4
+    finger_count = count_extended_fingers(hand_landmarks, handedness)
+    if label in {"2", "3", "4"} and finger_count in [2, 3, 4]:
+        label = str(finger_count)
+
     return label, pred_prob, True
 
 
@@ -164,203 +227,25 @@ def predict_image_bytes(image_bytes: bytes):
     label, prob, has_hand = predict_from_bgr(frame_bgr, use_static_detector=True)
     return label, prob, has_hand
 
+# dem ngon, fix 234
+def count_extended_fingers(hand_landmarks, handedness: str | None = None) -> int:
+    lm = hand_landmarks.landmark
 
-# # app/ml/gesture_model.py
-#
-# import os
-# from pathlib import Path
-#
-# import cv2
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
-# from torchvision import transforms
-# from torchvision.models import resnet18
-# from PIL import Image
-# import numpy as np
-# import mediapipe as mp
-#
-# import mlflow
-# import mlflow.pytorch
-#
-#
-# # 1) CONFIG
-#
-# DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# NUM_CLASSES = 6
-# IMAGE_SIZE = 224
-#
-# CLASS_NAMES = ["0", "1", "2", "3", "4", "5"]
-#
-# IMAGENET_MEAN = [0.485, 0.456, 0.406]
-# IMAGENET_STD = [0.229, 0.224, 0.225]
-#
-# # fallback local .pth (khi MLflow không có)
-# ROOT_DIR = Path(__file__).resolve().parents[2]  # .../backend
-# MODEL_PATH = ROOT_DIR / "models" / "ResNet18_merged_phase2_epoch14_loss3_17_11_2025_09_27_35.pth"
-#
-# # MLflow Registry
-# MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
-# MLFLOW_MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "gesture_resnet18")
-# MLFLOW_STAGE = os.getenv("MLFLOW_MODEL_STAGE", "Production")
-#
-# # Model global (load 1 lần)
-# _model = None
-# _model_source = None
-#
-# # 2) MEDIAPIPE HAND DETECTORS
-# mp_hands = mp.solutions.hands
-#
-# hands_detector = mp_hands.Hands(
-#     static_image_mode=False,
-#     max_num_hands=1,
-#     min_detection_confidence=0.5,
-#     min_tracking_confidence=0.5,
-# )
-#
-# hands_static = mp_hands.Hands(
-#     static_image_mode=True,
-#     max_num_hands=1,
-#     min_detection_confidence=0.5,
-# )
-#
-# # 3) MODEL BUILDERS / LOADERS
-# def build_model(num_classes: int = NUM_CLASSES):
-#     m = resnet18(weights=None)
-#     m.fc = nn.Linear(m.fc.in_features, num_classes)
-#     return m
-#
-# def load_model_local(model_path: Path = MODEL_PATH, device: str = DEVICE):
-#     m = build_model(NUM_CLASSES)
-#     state = torch.load(model_path, map_location=device)
-#     m.load_state_dict(state)
-#     m.to(device)
-#     m.eval()
-#     return m, str(model_path)
-#
-# def load_model_from_mlflow(device: str = DEVICE):
-#     """
-#     Load model from MLflow Model Registry:
-#     models:/<MLFLOW_MODEL_NAME>/<MLFLOW_STAGE>
-#     """
-#     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-#     uri = f"models:/{MLFLOW_MODEL_NAME}/{MLFLOW_STAGE}"
-#     m = mlflow.pytorch.load_model(uri, map_location=device)
-#     m.to(device)
-#     m.eval()
-#     return m, uri
-#
-# def init_model():
-#     """
-#     Ưu tiên MLflow -> fallback local .pth
-#     """
-#     global _model, _model_source
-#     try:
-#         _model, _model_source = load_model_from_mlflow()
-#         print(f"✅ Loaded model from MLflow: {_model_source}")
-#     except Exception as e:
-#         print(f"⚠️ MLflow load failed, fallback to local .pth. Reason: {e}")
-#         _model, _model_source = load_model_local()
-#         print(f"✅ Loaded model from local: {_model_source}")
-#
-# def reload_model():
-#     """
-#     Dùng cho endpoint admin để reload model mà không cần restart backend.
-#     """
-#     init_model()
-#     return {"status": "ok", "source": _model_source}
-#
-# # Load ngay khi module import
-# init_model()
-#
-# # 4) TRANSFORM / PREPROCESS
-# transform_infer = transforms.Compose(
-#     [
-#         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-#         transforms.ToTensor(),
-#         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-#     ]
-# )
-#
-# def preprocess_from_cv2(frame_bgr: np.ndarray) -> torch.Tensor:
-#     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-#     pil_img = Image.fromarray(frame_rgb)
-#     tensor = transform_infer(pil_img).unsqueeze(0)
-#     return tensor
-#
-#
-# # 5) HAND CROP (MEDIAPIPE)
-# def get_hand_bbox_from_mediapipe(frame_bgr: np.ndarray, hands):
-#     h, w = frame_bgr.shape[:2]
-#     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-#     results = hands.process(frame_rgb)
-#
-#     if not results.multi_hand_landmarks:
-#         return None
-#
-#     hand_landmarks = results.multi_hand_landmarks[0]
-#
-#     xs = [lm.x for lm in hand_landmarks.landmark]
-#     ys = [lm.y for lm in hand_landmarks.landmark]
-#
-#     x_min = min(xs) * w
-#     x_max = max(xs) * w
-#     y_min = min(ys) * h
-#     y_max = max(ys) * h
-#
-#     margin = 0.2
-#     box_w = x_max - x_min
-#     box_h = y_max - y_min
-#
-#     x_min = int(max(0, x_min - margin * box_w))
-#     y_min = int(max(0, y_min - margin * box_h))
-#     x_max = int(min(w, x_max + margin * box_w))
-#     y_max = int(min(h, y_max + margin * box_h))
-#
-#     if x_max <= x_min or y_max <= y_min:
-#         return None
-#
-#     return x_min, y_min, x_max, y_max
-#
-#
-# # 6) PREDICT CORE
-# def predict_from_bgr(frame_bgr: np.ndarray, use_static_detector: bool = True):
-#     """
-#     Nhận frame BGR -> trả (label, prob, has_hand)
-#     - Nếu không thấy tay -> ("no_hand", 0.0, False)
-#     """
-#     global _model
-#     if _model is None:
-#         init_model()
-#
-#     hands = hands_static if use_static_detector else hands_detector
-#     bbox = get_hand_bbox_from_mediapipe(frame_bgr, hands)
-#
-#     if bbox is None:
-#         return "no_hand", 0.0, False
-#
-#     x1, y1, x2, y2 = bbox
-#     hand_bgr = frame_bgr[y1:y2, x1:x2]
-#
-#     input_tensor = preprocess_from_cv2(hand_bgr).to(DEVICE)
-#
-#     with torch.no_grad():
-#         logits = _model(input_tensor)
-#         probs = F.softmax(logits, dim=1)[0]
-#         pred_idx = int(torch.argmax(probs).item())
-#         pred_prob = float(probs[pred_idx].item())
-#
-#     label = CLASS_NAMES[pred_idx]
-#     return label, pred_prob, True
-#
-# def predict_image_bytes(image_bytes: bytes):
-#     """
-#     Nhận bytes ảnh -> decode -> predict
-#     """
-#     nparr = np.frombuffer(image_bytes, np.uint8)
-#     frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-#     if frame_bgr is None:
-#         raise ValueError("Không decode được ảnh từ bytes")
-#
-#     label, prob, has_hand = predict_from_bgr(frame_bgr, use_static_detector=True)
-#     return label, prob, has_hand
+    # index, middle, ring, pinky
+    count = 0
+    finger_tips = [8, 12, 16, 20]
+    finger_pips = [6, 10, 14, 18]
+
+    for tip, pip in zip(finger_tips, finger_pips):
+        if lm[tip].y < lm[pip].y:
+            count += 1
+
+    # thumb
+    if handedness == "Right":
+        if lm[4].x < lm[3].x:
+            count += 1
+    elif handedness == "Left":
+        if lm[4].x > lm[3].x:
+            count += 1
+
+    return count

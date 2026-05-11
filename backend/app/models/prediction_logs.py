@@ -27,5 +27,6 @@ class PredictionLog(Base):
     is_correct = Column(Boolean)  
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    image_path = Column(String(255), nullable=True)
 
     user = relationship("User", back_populates="prediction_logs")

@@ -2,9 +2,8 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
-
+import ProtectedPage from "@/components/auth/protected-page"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -22,7 +21,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
-import { AlertCircle, Edit2, RotateCcw, Trash2, CheckCircle2 } from "lucide-react"
+import { AlertCircle, Edit2, RotateCcw, Trash2, CheckCircle2, ArrowLeft } from "lucide-react"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"
 
@@ -42,7 +41,6 @@ interface GestureUI extends GestureMapping {
 
 export default function GesturesPage() {
   const { user, isAuthenticated, token } = useAuth()
-  const router = useRouter()
 
   const [items, setItems] = useState<GestureMapping[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -65,9 +63,9 @@ export default function GesturesPage() {
   }, [user?.id])
 
   // Redirect nếu chưa login (để tránh lỗi hydration / rules of hooks)
-  useEffect(() => {
-    if (!isAuthenticated) router.push("/login")
-  }, [isAuthenticated, router])
+  // useEffect(() => {
+  //   if (!isAuthenticated) router.push("/login")
+  // }, [isAuthenticated, router])
 
   // Load enabled map (localStorage)
   useEffect(() => {
@@ -290,16 +288,26 @@ export default function GesturesPage() {
   if (!isAuthenticated || !user) return null
 
   return (
+    <ProtectedPage allowRoles={["user", "caregiver", "admin"]}>
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
-        <Link href="/" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
 
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-primary mb-2">Quản Lý Từ Vựng Cử Chỉ</h1>
           <p className="text-muted-foreground">
-            Tùy chỉnh câu nói tương ứng với từng cử chỉ tay. Thay đổi này chỉ áp dụng cho tài khoản của bạn.
+            Tùy chỉnh câu nói tương ứng với từng cử chỉ tay.
           </p>
         </div>
 
@@ -420,7 +428,7 @@ export default function GesturesPage() {
                           </Button>
 
                           {/* Delete/Disable with confirm */}
-                          <AlertDialog>
+                          {/* <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button variant="outline" size="sm" className="text-destructive bg-transparent">
                                 <Trash2 className="w-4 h-4" />
@@ -434,17 +442,17 @@ export default function GesturesPage() {
                                 (Thao tác này cũng reset câu tùy chỉnh về mặc định.)
                               </AlertDialogDescription>
 
-                              <div className="flex gap-3">
+                              <div className="flex justify-end gap-3">
                                 <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary">Huỷ</AlertDialogCancel>
                                 <AlertDialogAction
                                   onClick={() => handleDisableGesture(gesture.model_label)}
-                                  className="bg-destructive"
+                                  className="bg-red-500 hover:bg-red-600"
                                 >
                                   Xoá
                                 </AlertDialogAction>
                               </div>
                             </AlertDialogContent>
-                          </AlertDialog>
+                          </AlertDialog> */}
                         </div>
                       </div>
 
@@ -546,8 +554,8 @@ export default function GesturesPage() {
                   Bạn có chắc muốn tiếp tục không?
                 </AlertDialogDescription>
 
-                <div className="flex gap-3">
-                  <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary">Huỷ</AlertDialogCancel>
+                <div className="flex justify-end gap-3">
+                  <AlertDialogCancel className="hover:bg-red-500 hover:text-white">Huỷ</AlertDialogCancel>
                   <AlertDialogAction onClick={handleResetAll}>
                     Đặt lại
                   </AlertDialogAction>
@@ -565,7 +573,7 @@ export default function GesturesPage() {
               >
                 <h3 className="text-xl font-bold text-primary mb-3">Gói Cơ Bản</h3>
                 <p className="text-muted-foreground mb-4">
-                  Bật các cử chỉ 0–5. Các cử chỉ khác sẽ được tắt (nếu có).
+                  Bật các cử chỉ 0–5.
                 </p>
                 <Button
                   onClick={() => handleApplyProfile("basic")}
@@ -582,7 +590,7 @@ export default function GesturesPage() {
               >
                 <h3 className="text-xl font-bold text-primary mb-3">Gói Nâng Cao</h3>
                 <p className="text-muted-foreground mb-4">
-                  Bật các cử chỉ 0–7 (nếu backend có). Các cử chỉ khác sẽ được tắt.
+                  Bật các cử chỉ 0–20. 
                 </p>
                 <Button
                   onClick={() => handleApplyProfile("advanced")}
@@ -597,5 +605,6 @@ export default function GesturesPage() {
         </Tabs>
       </div>
     </main>
+    </ProtectedPage>
   )
 }

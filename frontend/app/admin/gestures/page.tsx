@@ -1,10 +1,9 @@
 "use client"
 
 import { AlertDialogTrigger } from "@/components/ui/alert-dialog"
-
+import ProtectedPage from "@/components/auth/protected-page"
 import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -18,75 +17,118 @@ import {
   AlertDialogDescription,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Plus, Trash2, Edit2 } from "lucide-react"
+import { Plus, Trash2, Edit2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
-
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000"
 interface GestureClass {
   id: string
   name: string
   defaultText: string
+  isActive?: boolean
 }
 
 export default function AdminGesturesPage() {
-  const { user, isAuthenticated } = useAuth()
-  const router = useRouter()
+  // const { user, isAuthenticated, token } = useAuth()
+  const { token } = useAuth()
   const [gestures, setGestures] = useState<GestureClass[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingGesture, setEditingGesture] = useState<GestureClass | null>(null)
   const [formData, setFormData] = useState({ id: "", name: "", defaultText: "" })
   const [gestureToDelete, setGestureToDelete] = useState<string | null>(null)
-
-  const defaultGestures: GestureClass[] = [
-    { id: "0", name: "Cử chỉ 0", defaultText: "Xin chào" },
-    { id: "1", name: "Cử chỉ 1", defaultText: "Tôi cần giúp đỡ" },
-    { id: "2", name: "Cử chỉ 2", defaultText: "Vâng" },
-    { id: "3", name: "Cử chỉ 3", defaultText: "Không" },
-    { id: "4", name: "Cử chỉ 4", defaultText: "Cảm ơn" },
-    { id: "5", name: "Cử chỉ 5", defaultText: "Tôi đang đau" },
-  ]
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!isAuthenticated || user?.role !== "admin") {
-      router.push("/")
-      return
+    // if (!isAuthenticated || user?.role !== "admin") {
+    //   router.push("/")
+    //   return
+    // }
+
+    if (!token) return
+
+    const run = async () => {
+      try {
+        setIsLoading(true)
+        setError(null)
+
+        const res = await fetch(`${API_BASE_URL}/admin/gestures`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (!res.ok) throw new Error(await res.text())
+
+        const data: GestureClass[] = await res.json()
+        setGestures(data)
+      } catch (e: any) {
+        console.error("load gestures failed:", e)
+        setError(e?.message || "Không tải được danh sách cử chỉ.")
+        setGestures([])
+      } finally {
+        setIsLoading(false)
+      }
     }
 
-    const storedGestures = localStorage.getItem("system_gestures")
-    if (storedGestures) {
-      setGestures(JSON.parse(storedGestures))
-    } else {
-      setGestures(defaultGestures)
-      localStorage.setItem("system_gestures", JSON.stringify(defaultGestures))
-    }
-    setIsLoading(false)
-  }, [user?.role, isAuthenticated, router])
+    run()
+  // }, [user?.role, isAuthenticated, router, token])
+    }, [token])
 
-  const saveGestures = (updatedGestures: GestureClass[]) => {
-    setGestures(updatedGestures)
-    localStorage.setItem("system_gestures", JSON.stringify(updatedGestures))
-  }
 
-  const handleAddGesture = () => {
+  const handleAddGesture = async () => {
+    if (!token) return
     if (!formData.id || !formData.name || !formData.defaultText) return
 
-    if (editingGesture) {
-      const updated = gestures.map((g) =>
-        g.id === editingGesture.id ? { id: formData.id, name: formData.name, defaultText: formData.defaultText } : g,
-      )
-      saveGestures(updated)
-      setEditingGesture(null)
-    } else {
-      const newGesture: GestureClass = {
-        id: formData.id,
-        name: formData.name,
-        defaultText: formData.defaultText,
-      }
-      saveGestures([...gestures, newGesture])
-    }
+    try {
+      setError(null)
+      setSuccess(null)
 
-    setFormData({ id: "", name: "", defaultText: "" })
-    setIsDialogOpen(false)
+      if (editingGesture) {
+        const res = await fetch(`${API_BASE_URL}/admin/gestures/${editingGesture.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            defaultText: formData.defaultText,
+          }),
+        })
+
+        if (!res.ok) throw new Error(await res.text())
+
+        const updatedGesture: GestureClass = await res.json()
+        setGestures((prev) =>
+          prev.map((g) => (g.id === editingGesture.id ? updatedGesture : g))
+        )
+        setSuccess("Đã cập nhật cử chỉ.")
+        setEditingGesture(null)
+      } else {
+        const res = await fetch(`${API_BASE_URL}/admin/gestures`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            id: formData.id,
+            name: formData.name,
+            defaultText: formData.defaultText,
+          }),
+        })
+
+        if (!res.ok) throw new Error(await res.text())
+
+        const newGesture: GestureClass = await res.json()
+        setGestures((prev) => [...prev, newGesture])
+        setSuccess("Đã thêm cử chỉ mới.")
+      }
+
+      setFormData({ id: "", name: "", defaultText: "" })
+      setIsDialogOpen(false)
+    } catch (e: any) {
+      console.error(e)
+      setError(e?.message || "Không thể lưu cử chỉ.")
+    }
   }
 
   const handleEditGesture = (gesture: GestureClass) => {
@@ -95,22 +137,49 @@ export default function AdminGesturesPage() {
     setIsDialogOpen(true)
   }
 
-  const handleDeleteGesture = (gestureId: string) => {
-    const updated = gestures.filter((g) => g.id !== gestureId)
-    saveGestures(updated)
-    setGestureToDelete(null)
+  const handleDeleteGesture = async (gestureId: string) => {
+    if (!token) return
+
+    try {
+      setError(null)
+      setSuccess(null)
+
+      const res = await fetch(`${API_BASE_URL}/admin/gestures/${gestureId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (!res.ok) throw new Error(await res.text())
+
+      setGestures((prev) => prev.filter((g) => g.id !== gestureId))
+      setGestureToDelete(null)
+      setSuccess("Đã xóa cử chỉ.")
+    } catch (e: any) {
+      console.error(e)
+      setError(e?.message || "Không thể xóa cử chỉ.")
+    }
   }
 
-  if (!isAuthenticated || user?.role !== "admin") {
-    return null
-  }
+  // if (!isAuthenticated || user?.role !== "admin") {
+  //   return null
+  // }
 
   return (
+    <ProtectedPage allowRoles={["admin"]}>
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
-        <Link href="/admin" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại Admin
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/admin">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
 
         <div className="mb-8 flex justify-between items-start">
           <div>
@@ -120,7 +189,7 @@ export default function AdminGesturesPage() {
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button
-                className="bg-primary hover:bg-primary/90"
+                className="bg-teal-500 hover:bg-teal-600"
                 onClick={() => {
                   setEditingGesture(null)
                   setFormData({ id: "", name: "", defaultText: "" })
@@ -170,6 +239,17 @@ export default function AdminGesturesPage() {
             </DialogContent>
           </Dialog>
         </div>
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {success}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {gestures.map((gesture) => (
@@ -199,9 +279,9 @@ export default function AdminGesturesPage() {
                         <AlertDialogDescription>
                           Hành động này sẽ xoá cử chỉ này khỏi hệ thống. Điều này không thể hoàn tác.
                         </AlertDialogDescription>
-                        <div className="flex gap-3">
+                        <div className="flex justify-end gap-3">
                           <AlertDialogCancel>Huỷ</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteGesture(gesture.id)} className="bg-destructive">
+                          <AlertDialogAction onClick={() => handleDeleteGesture(gesture.id)} className="bg-red-500 hover:bg-red-600">
                             Xoá
                           </AlertDialogAction>
                         </div>
@@ -216,5 +296,6 @@ export default function AdminGesturesPage() {
         </div>
       </div>
     </main>
+    </ProtectedPage>
   )
 }

@@ -93,8 +93,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Đăng nhập thất bại");
+        let message = "Đăng nhập thất bại"
+
+        const text = await res.text()
+        try {
+          const data = JSON.parse(text)
+          if (data && typeof data.detail === "string") {
+            message = data.detail
+          } else if (typeof data === "string") {
+            message = data
+          } else if (text) {
+            message = text
+          }
+        } catch {
+          if (text) message = text
+        }
+
+        throw new Error(message)
       }
 
       const data: {
@@ -108,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: data.user.email,
         name: data.user.name,
         role: (data.user.role as any) || "user",
-        preferredLanguage: "vi", 
+        preferredLanguage: "vi",
         createdAt: new Date(),
       };
 
@@ -149,7 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const data = JSON.parse(text);
             if (data && typeof data.detail === "string") {
-              message = data.detail; 
+              message = data.detail;
             } else if (typeof data === "string") {
               message = data;
             }

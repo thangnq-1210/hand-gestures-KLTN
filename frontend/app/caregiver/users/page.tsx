@@ -1,10 +1,12 @@
 "use client"
 
+import { useEffect, useState, useCallback } from "react"
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import ProtectedPage from "@/components/auth/protected-page"
+import Link from "next/link"
+import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { ArrowLeft } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import {
   AlertDialog,
@@ -16,225 +18,265 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Users, Trash2, Edit2 } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { AlertCircle, Link2, Trash2, Eye } from "lucide-react"
+import {
+  apiCaregiverGetPatients,
+  apiCaregiverLinkPatient,
+  apiCaregiverUnlinkPatient,
+  type CaregiverPatientRelation,
+} from "@/lib/api"
 
 export default function CaregiverUsersPage() {
-  const { user, isAuthenticated } = useAuth()
-  const router = useRouter()
-  const [managedUsers, setManagedUsers] = useState<any[]>([])
-  const [formData, setFormData] = useState({
-    name: "",
-    language: "vi",
-    disabilityLevel: "light",
+  const { token, isAuthenticated, user } = useAuth()
+  // const router = useRouter()
+
+  const [patients, setPatients] = useState<CaregiverPatientRelation[]>([])
+  const [patientEmail, setPatientEmail] = useState("")
+  const [relationType, setRelationType] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [unlinkingPatient, setUnlinkingPatient] = useState<CaregiverPatientRelation | null>(null)
+  const [search, setSearch] = useState("")
+  // useEffect(() => {
+  //   if (!isAuthenticated) router.push("/login")
+  // }, [isAuthenticated, router])
+
+  // useEffect(() => {
+  //   if (isAuthenticated && user && user.role !== "caregiver") {
+  //     router.push("/")
+  //   }
+  // }, [isAuthenticated, user, router])
+
+  const loadPatients = useCallback(async () => {
+    if (!token) return
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await apiCaregiverGetPatients(token)
+      setPatients(data)
+    } catch (e) {
+      console.error(e)
+      setError("Không tải được danh sách bệnh nhân.")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [token])
+
+  useEffect(() => {
+    void loadPatients()
+  }, [loadPatients])
+
+  const handleLinkPatient = async () => {
+    if (!token) return
+    if (!patientEmail.trim()) {
+      setError("Vui lòng nhập email bệnh nhân.")
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      setError(null)
+      setSuccess(null)
+
+      await apiCaregiverLinkPatient(token, patientEmail.trim(), relationType.trim() || undefined)
+
+      setPatientEmail("")
+      setRelationType("")
+      setSuccess("Liên kết bệnh nhân thành công.")
+      await loadPatients()
+    } catch (e: any) {
+      console.error(e)
+      setError(e?.message || "Không thể liên kết bệnh nhân.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleUnlinkPatient = async (patientId: number) => {
+    if (!token) return
+
+    try {
+      setError(null)
+      setSuccess(null)
+      await apiCaregiverUnlinkPatient(token, patientId)
+      setSuccess("Đã hủy liên kết bệnh nhân.")
+      setUnlinkingPatient(null)
+      await loadPatients()
+    } catch (e: any) {
+      console.error(e)
+      setError(e?.message || "Không thể hủy liên kết.")
+    }
+  }
+
+  const filteredPatients = patients.filter((item) => {
+    const keyword = search.toLowerCase().trim()
+    if (!keyword) return true
+
+    return (
+      item.patient.name.toLowerCase().includes(keyword) ||
+      item.patient.email.toLowerCase().includes(keyword)
+    )
   })
-  const [editingId, setEditingId] = useState<string | null>(null)
 
-  if (!isAuthenticated || user?.role !== "caregiver") {
-    router.push("/login")
-    return null
-  }
-
-  const handleAddUser = () => {
-    if (formData.name.trim()) {
-      const newUser = {
-        id: "user_" + Date.now(),
-        name: formData.name,
-        language: formData.language,
-        disabilityLevel: formData.disabilityLevel,
-      }
-      setManagedUsers([...managedUsers, newUser])
-      setFormData({ name: "", language: "vi", disabilityLevel: "light" })
-    }
-  }
-
-  const handleDeleteUser = (userId: string) => {
-    setManagedUsers(managedUsers.filter((u) => u.id !== userId))
-  }
-
-  const handleEditUser = (user: any) => {
-    setFormData({
-      name: user.name,
-      language: user.language,
-      disabilityLevel: user.disabilityLevel,
-    })
-    setEditingId(user.id)
-  }
-
-  const handleSaveEdit = () => {
-    if (editingId && formData.name.trim()) {
-      setManagedUsers(
-        managedUsers.map((u) =>
-          u.id === editingId
-            ? {
-                ...u,
-                name: formData.name,
-                language: formData.language,
-                disabilityLevel: formData.disabilityLevel,
-              }
-            : u,
-        ),
-      )
-      setFormData({ name: "", language: "vi", disabilityLevel: "light" })
-      setEditingId(null)
-    }
-  }
+  // if (!isAuthenticated || !user || user.role !== "caregiver") return null
 
   return (
-    <main className="min-h-screen pt-20 pb-12">
-      <div className="max-w-7xl mx-auto px-4 md:px-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Quản Lý Người Dùng</h1>
-          <p className="text-muted-foreground">Tạo và quản lý profile cho những người bạn chăm sóc</p>
-        </div>
+    <ProtectedPage allowRoles={["caregiver"]}>
+      <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
+        <div className="max-w-5xl mx-auto space-y-6">
+          <Link href="/caregiver">
+            <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+              <ArrowLeft className="w-4 h-4" />
+              Quay lại
+            </Button>
+          </Link>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Form */}
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle>{editingId ? "Chỉnh Sửa Người Dùng" : "Thêm Người Dùng Mới"}</CardTitle>
-              <CardDescription>
-                {editingId ? "Cập nhật thông tin người dùng" : "Tạo profile cho người dùng mới"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-2 block">Tên Người Dùng</label>
+          <div>
+            <h1 className="text-3xl font-bold text-primary">Quản lý bệnh nhân</h1>
+            <p className="text-muted-foreground mt-1">
+              Liên kết, theo dõi và quản lý các bệnh nhân bạn đang hỗ trợ.
+            </p>
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {success && (
+            <Alert className="border-emerald-500 bg-emerald-50 text-emerald-800">
+              <AlertDescription>{success}</AlertDescription>
+            </Alert>
+          )}
+
+          <Card className="p-6 space-y-4">
+            <h2 className="text-xl font-bold text-primary flex items-center gap-2">
+              <Link2 className="w-5 h-5" />
+              Liên kết bệnh nhân
+            </h2>
+
+            <div className="grid gap-4 ">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Email bệnh nhân</label>
                 <Input
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Nhập tên"
+                  placeholder="user@email.com"
+                  value={patientEmail}
+                  onChange={(e) => setPatientEmail(e.target.value)}
                 />
               </div>
 
-              <div>
-                <label className="text-sm font-medium mb-2 block">Ngôn Ngữ Ưu Tiên</label>
-                <Select
-                  value={formData.language}
-                  onValueChange={(value) => setFormData({ ...formData, language: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="vi">Tiếng Việt</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* <div className="space-y-2">
+              <label className="text-sm font-medium">Mối quan hệ (tùy chọn)</label>
+              <Input
+                placeholder="Người thân / người chăm sóc / giáo viên..."
+                value={relationType}
+                onChange={(e) => setRelationType(e.target.value)}
+              />
+            </div> */}
+            </div>
 
-              <div>
-                <label className="text-sm font-medium mb-2 block">Mức Độ Khiếm Khuyết</label>
-                <Select
-                  value={formData.disabilityLevel}
-                  onValueChange={(value) => setFormData({ ...formData, disabilityLevel: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Không cần hỗ trợ</SelectItem>
-                    <SelectItem value="light">Nhẹ</SelectItem>
-                    <SelectItem value="moderate">Trung Bình</SelectItem>
-                    <SelectItem value="severe">Nặng</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex gap-2">
-                {editingId ? (
-                  <>
-                    <Button className="flex-1" onClick={handleSaveEdit}>
-                      Lưu Thay Đổi
-                    </Button>
-                    <Button
-                      className="flex-1 bg-transparent"
-                      variant="outline"
-                      onClick={() => {
-                        setEditingId(null)
-                        setFormData({ name: "", language: "vi", disabilityLevel: "light" })
-                      }}
-                    >
-                      Hủy
-                    </Button>
-                  </>
-                ) : (
-                  <Button className="w-full" onClick={handleAddUser}>
-                    Thêm Người Dùng
-                  </Button>
-                )}
-              </div>
-            </CardContent>
+            <Button onClick={handleLinkPatient} disabled={isSubmitting} className="bg-primary hover:bg-primary/90">
+              {isSubmitting ? "Đang liên kết..." : "Liên kết bệnh nhân"}
+            </Button>
           </Card>
 
-          {/* Users List */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="w-5 h-5" />
-                  Danh Sách Người Dùng ({managedUsers.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {managedUsers.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <p>Chưa có người dùng nào được tạo</p>
-                    <p className="text-sm">Thêm người dùng mới từ biểu mẫu bên cạnh</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {managedUsers.map((user) => (
-                      <div
-                        key={user.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition"
-                      >
-                        <div className="flex-1">
-                          <h3 className="font-semibold">{user.name}</h3>
-                          <p className="text-sm text-muted-foreground">
-                            Mức độ:{" "}
-                            {
-                              {
-                                none: "Không cần hỗ trợ",
-                                light: "Nhẹ",
-                                moderate: "Trung Bình",
-                                severe: "Nặng",
-                              }[user.disabilityLevel]
-                            }
-                            | Ngôn ngữ: {user.language === "vi" ? "Tiếng Việt" : "English"}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleEditUser(user)}>
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button size="sm" variant="destructive">
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Xoá Người Dùng</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Bạn có chắc chắn muốn xoá "{user.name}"? Hành động này không thể hoàn tác.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogAction onClick={() => handleDeleteUser(user.id)}>Xoá</AlertDialogAction>
-                              <AlertDialogCancel>Hủy</AlertDialogCancel>
-                            </AlertDialogContent>
-                          </AlertDialog>
+          <Card className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-primary">Danh sách bệnh nhân đang quản lý</h2>
+              <Badge variant="secondary">{patients.length} bệnh nhân</Badge>
+            </div>
+            <Input
+              placeholder="Tìm theo tên hoặc email bệnh nhân..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {isLoading ? (
+              <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+            ) : patients.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Bạn chưa liên kết với bệnh nhân nào.</p>
+            ) : filteredPatients.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Không tìm thấy bệnh nhân phù hợp.</p>
+            ) : (
+              <div className="space-y-3">
+                {filteredPatients.map((item) => (
+                  <div
+                    key={item.id}
+                    className="border rounded-xl p-4 bg-background hover:bg-muted/20 transition-colors"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="font-bold text-lg">{item.patient.name}</p>
+                        <p className="text-sm text-muted-foreground">{item.patient.email}</p>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <Badge variant="outline">{item.patient.preferred_language || "vi"}</Badge>
+                          <Badge variant={item.patient.is_active ? "secondary" : "destructive"}>
+                            {item.patient.is_active ? "Đang hoạt động" : "Không hoạt động"}
+                          </Badge>
+                          {item.relation_type && <Badge>{item.relation_type}</Badge>}
                         </div>
                       </div>
-                    ))}
+
+                      <div className="flex gap-2 flex-wrap">
+                        <Link href={`/caregiver/patients/${item.patient.id}`}>
+                          <Button variant="default">
+                            <Eye className="w-4 h-4 mr-2" />
+                            Xem chi tiết
+                          </Button>
+                        </Link>
+
+                        <AlertDialog
+                          open={unlinkingPatient?.id === item.id}
+                          onOpenChange={(open) => {
+                            if (!open) setUnlinkingPatient(null)
+                          }}
+                        >
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="destructive"
+                              onClick={() => setUnlinkingPatient(item)}
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Hủy liên kết
+                            </Button>
+                          </AlertDialogTrigger>
+
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Xác nhận hủy liên kết</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Bạn có chắc muốn hủy liên kết với bệnh nhân{" "}
+                                <span className="font-semibold">{item.patient.name}</span> không?
+                                Hành động này sẽ làm bạn không còn quyền xem hồ sơ, lịch sử nhận diện
+                                và thống kê của bệnh nhân này.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+
+                            <div className="flex justify-end gap-3">
+                              <AlertDialogCancel>Hủy</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleUnlinkPatient(item.patient.id)}
+                                className="bg-destructive hover:bg-destructive/90"
+                              >
+                                Xác nhận hủy liên kết
+                              </AlertDialogAction>
+                            </div>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                ))}
+              </div>
+            )}
+          </Card>
         </div>
-      </div>
-    </main>
+      </main>
+    </ProtectedPage>
   )
 }

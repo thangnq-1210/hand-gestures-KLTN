@@ -3,7 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { AlertCircle, CheckCircle2, Info, Camera, Lock, X, Upload, Image } from "lucide-react"
+import { AlertCircle, CheckCircle2, Info, Camera, Lock, X, Upload, Image, Loader2 } from "lucide-react"
 import TextToSpeech from "./text-to-speech"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Slider } from "@/components/ui/slider"
@@ -13,17 +13,33 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useAuth } from "@/lib/auth-context"
 import { Badge } from "@/components/ui/badge"
 // import { Hands } from "@mediapipe/hands"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import Script from "next/script"
 declare global {
   interface Window {
     Hands?: any
+    drawConnectors?: any
+    drawLandmarks?: any
+    HAND_CONNECTIONS?: any
   }
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
+type RecognitionMode = "resnet" | "landmark"
+
+// interface GestureRecognitionProps {
+//   onGestureDetected: (gesture: string, text: string, confidence: number, imageDataUrl?: string) => void
+// }
 interface GestureRecognitionProps {
-  onGestureDetected: (gesture: string, text: string, confidence: number) => void
+  recognitionMode: RecognitionMode
+  onGestureDetected: (gesture: string, text: string, confidence: number, imageDataUrl?: string) => void
 }
 
 type RecognitionStatus =
@@ -54,7 +70,11 @@ type UploadPredictResult = {
 
 type SampleRow = { label: string | number }
 
-export default function GestureRecognition({ onGestureDetected }: GestureRecognitionProps) {
+// export default function GestureRecognition({ onGestureDetected }: GestureRecognitionProps) {
+export default function GestureRecognition({
+  recognitionMode,
+  onGestureDetected,
+}: GestureRecognitionProps) {
   // const { token, isAuthenticated } = useAuth()
   const { token, isAuthenticated, user } = useAuth()
   const [gestureMappings, setGestureMappings] = useState<GestureMapping[] | null>(null)
@@ -64,10 +84,33 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
+
+  const latestLandmarksRef = useRef<any[] | null>(null)
+  const latestHandLabelRef = useRef<"Left" | "Right" | null>(null)
   // const handsRef = useRef<Hands | null>(null)
   const rafRef = useRef<number | null>(null)
   const lastSendTsRef = useRef<number>(0)
   const [hasHandOverlay, setHasHandOverlay] = useState(false)
+  const latestHandsRef = useRef<
+    Array<{
+      landmarks: any[]
+      label: "Left" | "Right" | null
+    }>
+  >([])
+
+  const [modeDialogOpen, setModeDialogOpen] = useState(false)
+  const [modeDialogMessage, setModeDialogMessage] = useState("")
+  const prevRecognitionModeRef = useRef<RecognitionMode | null>(null)
+
+  useEffect(() => {
+    if (!modeDialogOpen) return
+
+    const timer = setTimeout(() => {
+      setModeDialogOpen(false)
+    }, 1800)
+
+    return () => clearTimeout(timer)
+  }, [modeDialogOpen])
 
   const [isLoading, setIsLoading] = useState(false)
   const [currentResult, setCurrentResult] = useState<{
@@ -142,6 +185,52 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
   // const [samplesPerSave, setSamplesPerSave] = useState(5)
   // const [isBurstSaving, setIsBurstSaving] = useState(false)
+  // key lưu lịch sử (theo user)
+  const HISTORY_KEY = user?.id ? `gesture_history_${user.id}` : "gesture_history_guest"
+
+  type HistoryItem = {
+    id: string
+    gesture: string
+    text: string
+    confidence: number
+    timestamp: number
+    imageDataUrl?: string
+  }
+
+  const makeThumbFromCanvas = useCallback(() => {
+    const src = canvasRef.current
+    if (!src) return null
+    const vw = src.width
+    const vh = src.height
+    if (!vw || !vh) return null
+
+    const thumbW = 320
+    const thumbH = Math.round((vh * thumbW) / vw)
+
+    const c = document.createElement("canvas")
+    c.width = thumbW
+    c.height = thumbH
+    const ctx = c.getContext("2d")
+    if (!ctx) return null
+
+    ctx.drawImage(src, 0, 0, thumbW, thumbH)
+    return c.toDataURL("image/jpeg", 0.7)
+  }, [])
+
+  const saveHistoryToLocal = useCallback(
+    (item: HistoryItem) => {
+      if (!HISTORY_KEY) return
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY)
+        const prev: HistoryItem[] = raw ? JSON.parse(raw) : []
+        const next = [item, ...prev].slice(0, 200)
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+      } catch (e) {
+        console.error("saveHistoryToLocal error:", e)
+      }
+    },
+    [HISTORY_KEY]
+  )
 
   const playServerTTS = useCallback(async (text: string) => {
     try {
@@ -192,6 +281,47 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     : fallbackGestures
 
   const selectedGestureObj = gestureList.find((g) => g.id === selectedGestureForCollection)
+
+
+  const getGestureTextById = useCallback(
+    (gestureId: string) => {
+      return gestureList.find((g) => String(g.id) === String(gestureId))?.text ?? `Cử chỉ ${gestureId}`
+    },
+    [gestureList]
+  )
+
+  const isFingerOpen = (lm: any[], tip: number, pip: number) => {
+    return lm[tip].y < lm[pip].y
+  }
+
+  const isThumbOpen = (lm: any[], handLabel: "Left" | "Right" | null) => {
+    if (!handLabel) return false
+
+    return handLabel === "Right" ? lm[4].x < lm[3].x : lm[4].x > lm[3].x
+  }
+
+  const classifyLandmarkGesture = useCallback(
+    (lm: any[], handLabel: "Left" | "Right" | null) => {
+      const thumb = isThumbOpen(lm, handLabel)
+      const index = isFingerOpen(lm, 8, 6)
+      const middle = isFingerOpen(lm, 12, 10)
+      const ring = isFingerOpen(lm, 16, 14)
+      const pinky = isFingerOpen(lm, 20, 18)
+
+      const pattern = [thumb, index, middle, ring, pinky].map((v) => (v ? "1" : "0")).join("")
+
+      // Ánh xạ tối giản cho bộ số 0–5
+      if (pattern === "00000") return { gesture: "0", confidence: 0.98 }
+      if (pattern === "01000") return { gesture: "1", confidence: 0.98 }
+      if (pattern === "01100") return { gesture: "2", confidence: 0.98 }
+      if (pattern === "01110") return { gesture: "3", confidence: 0.98 }
+      if (pattern === "01111") return { gesture: "4", confidence: 0.98 }
+      if (pattern === "11111") return { gesture: "5", confidence: 0.98 }
+
+      return null
+    },
+    []
+  )
 
   // tải mapping cử chỉ từ backend (đã tuỳ chỉnh theo user)
   useEffect(() => {
@@ -287,6 +417,126 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       })
       return
     }
+    if (recognitionMode === "landmark") {
+      try {
+        setIsLoading(true)
+        setRecognitionStatus("detecting")
+
+        const hands = latestHandsRef.current
+
+        if (!hands.length) {
+          setRecognitionStatus("no_hand")
+          setCurrentResult({
+            gesture: "-",
+            text: "Vui lòng giơ tay vào camera",
+            confidence: 0,
+          })
+
+          if (!oneTabMode && !dataCollectionMode) {
+            setTimeout(() => void captureAndPredict(), 1200)
+          }
+          return
+        }
+
+        let classified: { gesture: string; confidence: number } | null = null
+
+        for (const hand of hands) {
+          const result = classifyLandmarkGesture(hand.landmarks, hand.label)
+          if (result) {
+            classified = result
+            break
+          }
+        }
+
+        if (!classified) {
+          setRecognitionStatus("no_hand")
+          setCurrentResult({
+            gesture: "Không chắc chắn",
+            text: "Hand Landmarks chưa khớp mẫu cử chỉ 0–5",
+            confidence: 0,
+          })
+
+          if (!oneTabMode && !dataCollectionMode) {
+            setTimeout(() => void captureAndPredict(), 1200)
+          }
+          return
+        }
+
+        const effectiveGesture = classified.gesture
+        const effectiveText = getGestureTextById(effectiveGesture)
+        const effectiveConf = classified.confidence
+
+        const thumb = makeThumbFromCanvas()
+
+        setRecognitionStatus("high_confidence")
+        setCurrentResult({
+          gesture: effectiveGesture,
+          text: effectiveText,
+          confidence: effectiveConf,
+        })
+
+        onGestureDetected(effectiveGesture, effectiveText, effectiveConf, thumb ?? undefined)
+
+        // Nếu bạn vẫn muốn lưu local tạm thời thì giữ đoạn này.
+        // Nếu đã chuyển hẳn history sang DB thì có thể bỏ.
+        saveHistoryToLocal({
+          id: Date.now().toString(),
+          gesture: effectiveGesture,
+          text: effectiveText,
+          confidence: effectiveConf,
+          timestamp: Date.now(),
+          imageDataUrl: thumb ?? undefined,
+        })
+
+        if (autoSpeak && !pendingSpeech) {
+          const TOTAL_SECONDS = 3
+
+          if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+
+          setPendingSpeech(true)
+          setCountdown(TOTAL_SECONDS)
+
+          countdownIntervalRef.current = setInterval(() => {
+            setCountdown((prev) => {
+              if (prev === null) return null
+              if (prev <= 1) {
+                if (countdownIntervalRef.current) {
+                  clearInterval(countdownIntervalRef.current)
+                  countdownIntervalRef.current = null
+                }
+                return 0
+              }
+              return prev - 1
+            })
+          }, 1000)
+
+          speechTimeoutRef.current = setTimeout(() => {
+            setPendingSpeech(false)
+            setCountdown(null)
+            void playServerTTS(effectiveText)
+          }, TOTAL_SECONDS * 1000)
+        } else if (!autoSpeak) {
+          if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+          setPendingSpeech(false)
+          setCountdown(null)
+        }
+
+        return
+      } catch (error) {
+        console.error("Landmark prediction error:", error)
+        setRecognitionStatus("no_hand")
+        setCurrentResult({
+          gesture: "Lỗi",
+          text: "Lỗi khi xử lý Hand Landmarks.",
+          confidence: 0,
+        })
+        return
+      } finally {
+        setIsLoading(false)
+      }
+    }
 
     try {
       setIsLoading(true)
@@ -315,7 +565,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       ctx.drawImage(videoRef.current, 0, 0)
 
       const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
-
+      const thumb = makeThumbFromCanvas() ?? base64Image
       // const response = await fetch("/api/gesture/predict-base64", {
       const response = await fetch(`${API_BASE_URL}/gesture/predict-base64`, {
         method: "POST",
@@ -382,18 +632,26 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       const effectiveGesture = gesture || "Unknown"
       const effectiveText = text || "Không xác định"
       const effectiveConf = confidence || 0
-
+      // const thumb = makeThumbFromCanvas()
       setRecognitionStatus("high_confidence")
       setCurrentResult({
         gesture: effectiveGesture,
         text: effectiveText,
         confidence: effectiveConf,
       })
-      onGestureDetected(effectiveGesture, effectiveText, effectiveConf)
-
+      // onGestureDetected(effectiveGesture, effectiveText, effectiveConf)
+      onGestureDetected(effectiveGesture, effectiveText, effectiveConf, thumb ?? undefined)
+      saveHistoryToLocal({
+        id: Date.now().toString(),
+        gesture: effectiveGesture,
+        text: effectiveText,
+        confidence: effectiveConf,
+        timestamp: Date.now(),
+        imageDataUrl: thumb ?? undefined,
+      })
       // Auto speak (nếu bật)
       if (autoSpeak && !pendingSpeech) {
-        const TOTAL_SECONDS = 3
+        const TOTAL_SECONDS = 2
 
         if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
         if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
@@ -454,6 +712,12 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     pendingSpeech,
     playServerTTS,
     dataCollectionMode,
+    // captureThumbnail,
+    makeThumbFromCanvas,
+    saveHistoryToLocal,
+    recognitionMode,
+    classifyLandmarkGesture,
+    getGestureTextById,
   ])
 
   useEffect(() => {
@@ -469,14 +733,14 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
     const initAndRun = async () => {
       // đợi script load xong (window.Hands có)
-      if (!window.Hands) return
+      if (!window.Hands || !window.drawConnectors || !window.drawLandmarks || !window.HAND_CONNECTIONS) return
 
       const hands = new window.Hands({
         locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
       })
 
       hands.setOptions({
-        maxNumHands: 1,
+        maxNumHands: 2,
         modelComplexity: 1,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
@@ -491,32 +755,72 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
         overlay.height = h
         ctx.clearRect(0, 0, w, h)
 
-        const lm = results.multiHandLandmarks?.[0]
-        if (!lm) {
+        const multiLandmarks = results.multiHandLandmarks ?? []
+        const multiHandedness = results.multiHandedness ?? []
+
+        if (!multiLandmarks.length) {
+          latestHandsRef.current = []
+          latestLandmarksRef.current = null
+          latestHandLabelRef.current = null
           setHasHandOverlay(false)
           return
         }
+
         setHasHandOverlay(true)
 
-        let minX = 1, minY = 1, maxX = 0, maxY = 0
-        for (const p of lm) {
-          minX = Math.min(minX, p.x)
-          minY = Math.min(minY, p.y)
-          maxX = Math.max(maxX, p.x)
-          maxY = Math.max(maxY, p.y)
-        }
+        latestHandsRef.current = multiLandmarks.map((lm: any[], idx: number) => {
+          const handLabel = multiHandedness?.[idx]?.label as "Left" | "Right" | undefined
 
-        const x = minX * w
-        const y = minY * h
-        const bw = (maxX - minX) * w
-        const bh = (maxY - minY) * h
+          let minX = 1
+          let minY = 1
+          let maxX = 0
+          let maxY = 0
 
-        ctx.lineWidth = 4
-        ctx.strokeStyle = "#22c55e"
-        ctx.strokeRect(x, y, bw, bh)
-        ctx.font = "16px sans-serif"
-        ctx.fillStyle = "#22c55e"
-        ctx.fillText("Hand detected", x, Math.max(18, y - 8))
+          for (const p of lm) {
+            minX = Math.min(minX, p.x)
+            minY = Math.min(minY, p.y)
+            maxX = Math.max(maxX, p.x)
+            maxY = Math.max(maxY, p.y)
+          }
+
+          if (recognitionMode === "landmark") {
+            if (window.drawConnectors && window.drawLandmarks && window.HAND_CONNECTIONS) {
+              window.drawConnectors(ctx, lm, window.HAND_CONNECTIONS, {
+                color: "#22c55e",
+                lineWidth: 3,
+              })
+
+              window.drawLandmarks(ctx, lm, {
+                color: "#16a34a",
+                lineWidth: 1,
+                radius: 4,
+              })
+            }
+          } else {
+            const x = minX * w
+            const y = minY * h
+            const bw = (maxX - minX) * w
+            const bh = (maxY - minY) * h
+
+            ctx.lineWidth = 4
+            ctx.strokeStyle = "#22c55e"
+            ctx.strokeRect(x, y, bw, bh)
+
+            ctx.font = "16px sans-serif"
+            ctx.fillStyle = "#22c55e"
+            ctx.fillText("Hand detected", x, Math.max(18, y - 8))
+          }
+
+          if (idx === 0) {
+            latestLandmarksRef.current = lm
+            latestHandLabelRef.current = handLabel ?? null
+          }
+
+          return {
+            landmarks: lm,
+            label: handLabel ?? null,
+          }
+        })
       })
 
       let lastTs = 0
@@ -539,7 +843,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
     // chạy init vài lần cho tới khi script load (nhẹ)
     const timer = setInterval(() => {
-      if (window.Hands) {
+      if (window.Hands && window.drawConnectors && window.drawLandmarks && window.HAND_CONNECTIONS) {
         clearInterval(timer)
         initAndRun()
       }
@@ -552,7 +856,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
       ctx.clearRect(0, 0, overlay.width, overlay.height)
       setHasHandOverlay(false)
     }
-  }, [isStreamActive])
+  }, [isStreamActive, recognitionMode])
 
   const initializeCamera = useCallback(async () => {
     try {
@@ -621,6 +925,48 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
     setCountdown(null)
   }, [])
 
+  const restartCameraForMode = useCallback(async () => {
+    stopCamera()
+
+    latestHandsRef.current = []
+    latestLandmarksRef.current = null
+    latestHandLabelRef.current = null
+    setHasHandOverlay(false)
+    setCurrentResult(null)
+    setRecognitionStatus("idle")
+
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await initializeCamera()
+  }, [initializeCamera, stopCamera])
+
+  useEffect(() => {
+    if (prevRecognitionModeRef.current === null) {
+      prevRecognitionModeRef.current = recognitionMode
+      return
+    }
+
+    if (prevRecognitionModeRef.current !== recognitionMode) {
+      const cameraWasActive = isStreamActive
+
+      setModeDialogMessage(
+        cameraWasActive
+          ? recognitionMode === "resnet"
+            ? "Đã chuyển sang chế độ Mô hình Resnet. Camera đang khởi động lại..."
+            : "Đã chuyển sang chế độ Hand Landmarks. Camera đang khởi động lại..."
+          : recognitionMode === "resnet"
+            ? "Đã chuyển sang chế độ Mô hình Resnet."
+            : "Đã chuyển sang chế độ Hand Landmarks."
+      )
+      setModeDialogOpen(true)
+
+      if (cameraWasActive) {
+        void restartCameraForMode()
+      }
+
+      prevRecognitionModeRef.current = recognitionMode
+    }
+  }, [recognitionMode, isStreamActive, restartCameraForMode])
+
   const handlePrimaryButtonClick = useCallback(() => {
     if (!isStreamActive || !videoRef.current || !canvasRef.current) {
       console.warn("Không thể nhận diện: camera chưa sẵn sàng")
@@ -676,6 +1022,8 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
     return canvasRef.current.toDataURL("image/jpeg", 0.9)
   }, [])
+
+
 
 
   const qualityCheck = useCallback(async (imageBase64: string) => {
@@ -798,130 +1146,6 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
 
 
   // ====== COLLECT FROM CAMERA (SAVE DIRECTLY) ======
-  // const handleCollectSample = useCallback(async () => {
-  //   if (!isAuthenticated || !token) {
-  //     setCurrentResult({
-  //       gesture: "-",
-  //       text: "Vui lòng đăng nhập để thu thập dữ liệu",
-  //       confidence: 0,
-  //     })
-  //     return
-  //   }
-
-  //   if (!user?.id) {
-  //     setCurrentResult({ gesture: "Lỗi", text: "Thiếu user_id", confidence: 0 })
-  //     return
-  //   }
-
-  //   if (!videoRef.current || !canvasRef.current) return
-
-  //   // ✅ đảm bảo video đã có kích thước thật
-  //   const vw = videoRef.current.videoWidth
-  //   const vh = videoRef.current.videoHeight
-  //   if (!vw || !vh) {
-  //     setCurrentResult({ gesture: "Lỗi", text: "Camera chưa sẵn sàng (videoWidth=0). Đợi 1-2s rồi thử lại.", confidence: 0 })
-  //     return
-  //   }
-
-  //   const ctx = canvasRef.current.getContext("2d")
-  //   if (!ctx) return
-
-  //   canvasRef.current.width = vw
-  //   canvasRef.current.height = vh
-  //   ctx.drawImage(videoRef.current, 0, 0)
-
-  //   const base64Image = canvasRef.current.toDataURL("image/jpeg", 0.9)
-
-  //   try {
-  //     const res = await fetch(`${API_BASE_URL ?? "http://127.0.0.1:8000"}/collect/sample-base64`, {
-  //       method: "POST",
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //         Authorization: `Bearer ${token}`,
-  //       },
-  //       body: JSON.stringify({
-  //         user_id: String(user.id),
-  //         label: String(selectedGestureForCollection),
-  //         image_base64: base64Image,
-  //       }),
-  //     })
-
-  //     if (!res.ok) {
-  //       const msg = await res.text()
-  //       console.error("collect error:", res.status, msg)
-  //       setCurrentResult({ gesture: "Lỗi", text: "Không lưu được mẫu. " + msg, confidence: 0 })
-  //       return
-  //     }
-
-  //     // ✅ update UI count ngay
-  //     setCollectedSamples((prev) => ({
-  //       ...prev,
-  //       [selectedGestureForCollection]: (prev[selectedGestureForCollection] || 0) + 1,
-  //     }))
-
-  //     // ✅ thông báo đúng (không dùng uploadPredictResult)
-  //     showSaveNotice(`Đã lưu 1 mẫu cho cử chỉ ${selectedGestureForCollection}`)
-  //   } catch (e) {
-  //     console.error(e)
-  //     setCurrentResult({ gesture: "Lỗi", text: "Không lưu được mẫu. Vui lòng thử lại.", confidence: 0 })
-  //   }
-  // }, [
-  //   isAuthenticated,
-  //   token,
-  //   user?.id,
-  //   selectedGestureForCollection,
-  //   showSaveNotice,
-  //   API_BASE_URL,
-  // ])
-  // const handleCollectSample = useCallback(async () => {
-  //   if (!isAuthenticated || !token) return
-  //   if (!user?.id) {
-  //     showSaveNotice("Thiếu user_id")
-  //     return
-  //   }
-
-  //   // chỉ cho lưu khi hệ thống đang thấy tay
-  //   if (!canSaveCamera || !cameraFrameForSave) {
-  //     showSaveNotice("⚠️ Chưa thấy tay rõ trong khung hình nên chưa thể lưu.")
-  //     return
-  //   }
-
-  //   try {
-  //     const res = await fetch(`${API_BASE_URL}/collect/sample-base64`, {
-  //       method: "POST",
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //         Authorization: `Bearer ${token}`,
-  //       },
-  //       body: JSON.stringify({
-  //         user_id: String(user.id),
-  //         label: String(selectedGestureForCollection),
-  //         image_base64: cameraFrameForSave,
-  //       }),
-  //     })
-
-  //     if (!res.ok) throw new Error(await res.text())
-
-  //     setCollectedSamples((prev) => ({
-  //       ...prev,
-  //       [selectedGestureForCollection]: (prev[selectedGestureForCollection] || 0) + 1,
-  //     }))
-
-  //     showSaveNotice(`Đã lưu 1 mẫu cho cử chỉ ${selectedGestureForCollection}`)
-  //   } catch (e) {
-  //     console.error(e)
-  //     showSaveNotice("Lưu mẫu thất bại, vui lòng thử lại.")
-  //   }
-  // }, [
-  //   isAuthenticated,
-  //   token,
-  //   user?.id,
-  //   selectedGestureForCollection,
-  //   canSaveCamera,
-  //   cameraFrameForSave,
-  //   API_BASE_URL,
-  //   showSaveNotice,
-  // ])
 
   const handleCollectSample = useCallback(async () => {
     if (!isAuthenticated || !token) return
@@ -1201,7 +1425,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
               className="w-full aspect-video object-cover"
               aria-label="Webcam feed for gesture recognition"
             />
-            
+
             <canvas ref={overlayCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
             <canvas ref={canvasRef} className="hidden" />
 
@@ -1293,6 +1517,8 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
           </div>
         )}
 
+
+
         {mappingError && (
           <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
             <AlertCircle className="h-4 w-4" />
@@ -1337,7 +1563,7 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
               <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
                 <div className="space-y-1">
                   <Label className="text-base font-semibold">Đọc tự động</Label>
-                  <p className="text-sm text-muted-foreground">Khi bật, hệ thống sẽ hiển thị thông báo giữ tay và tự đọc sau 3 giây</p>
+                  <p className="text-sm text-muted-foreground">Khi bật, hệ thống sẽ hiển thị thông báo giữ tay và tự đọc sau 2 giây</p>
                 </div>
                 <Switch checked={autoSpeak} onCheckedChange={setAutoSpeak} />
               </div>
@@ -1735,6 +1961,20 @@ export default function GestureRecognition({ onGestureDetected }: GestureRecogni
           </TabsContent>
         </Tabs>
       </div>
+      <Dialog open={modeDialogOpen} onOpenChange={setModeDialogOpen}>
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle>Đang chuyển chế độ nhận diện</DialogTitle>
+            <DialogDescription>
+              {modeDialogMessage}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-8 w-8 animate-spin text-teal-500" />
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

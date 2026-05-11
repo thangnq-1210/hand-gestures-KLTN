@@ -1,6 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+// import { GeistSans } from "geist/font/sans"
+// import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -8,8 +9,13 @@ import MainLayout from "@/components/main-layout"
 
 import { AuthProvider } from "@/lib/auth-context";
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+import { Inter } from "next/font/google"
+
+const inter = Inter({
+  subsets: ["latin", "vietnamese"],
+  variable: "--font-sans",
+  display: "swap",
+})
 
 export const metadata: Metadata = {
   title: "V - HAND",
@@ -40,7 +46,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi">
-      <body className="font-sans antialiased">
+      <body className={`${inter.className} antialiased`}>
         <AuthProvider>
           <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
             <MainLayout>{children}</MainLayout>

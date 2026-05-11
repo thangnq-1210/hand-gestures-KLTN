@@ -4,7 +4,6 @@ from datetime import datetime
 import os
 from app.db import get_db
 from app.core.security import get_current_user
-from app.core.security import require_admin
 from app.models.user import User
 from app import models
 from app.ml import gesture_model
@@ -18,6 +17,9 @@ from sqlalchemy import func, case
 from app.models.training_job import TrainingJob
 from fastapi import HTTPException
 from app.core.security import require_admin, get_password_hash
+from fastapi.responses import FileResponse
+from tempfile import NamedTemporaryFile
+import zipfile
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.get("/samples")
@@ -324,8 +326,11 @@ def admin_change_role(
     admin: User = Depends(require_admin),
 ):
     new_role = payload.get("role")
-    if new_role not in ("user", "admin"):
-        raise HTTPException(status_code=400, detail="role must be 'user' or 'admin'")
+    if new_role not in ("user", "caregiver", "admin"):
+        raise HTTPException(
+            status_code=400,
+            detail="role must be 'user', 'caregiver' or 'admin'"
+        )
 
     u = db.query(models.User).filter(models.User.id == user_id).first()
     if not u:
@@ -357,6 +362,208 @@ def admin_set_password(
     u.password_hash = get_password_hash(new_password)
     db.commit()
     return {"ok": True, "id": u.id}
+
+@router.post("/users", status_code=201)
+def admin_create_user(
+    payload: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    email = str(payload.get("email", "")).strip().lower()
+    name = str(payload.get("name", "")).strip()
+    password = str(payload.get("password", "")).strip()
+    role = str(payload.get("role", "user")).strip()
+
+    if not email or not name or not password:
+        raise HTTPException(status_code=400, detail="name, email, password are required")
+
+    if role not in ("user", "caregiver", "admin"):
+        raise HTTPException(status_code=400, detail="role must be 'user', 'caregiver' or 'admin'")
+
+    existed = db.query(models.User).filter(models.User.email == email).first()
+    if existed:
+        raise HTTPException(status_code=400, detail="Email đã tồn tại")
+
+    new_user = models.User(
+        email=email,
+        name=name,
+        password_hash=get_password_hash(password),
+        role=role,
+        is_active=True,
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return {
+        "id": str(new_user.id),
+        "email": new_user.email,
+        "name": new_user.name,
+        "role": new_user.role,
+        "isLocked": (not new_user.is_active),
+        "createdAt": new_user.created_at.isoformat() if getattr(new_user, "created_at", None) else None,
+    }
+
+@router.get("/gestures")
+def admin_list_gestures(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    rows = (
+        db.query(models.GestureDictionary)
+        .order_by(models.GestureDictionary.model_label.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": str(r.model_label),
+            "name": f"Cử chỉ {r.model_label}",
+            "defaultText": r.default_text,
+            "isActive": bool(getattr(r, "is_active", True)),
+        }
+        for r in rows
+    ]
+
+@router.post("/gestures", status_code=201)
+def admin_create_gesture(
+    payload: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    model_label = str(payload.get("id", "")).strip()
+    default_text = str(payload.get("defaultText", "")).strip()
+
+    if not model_label or not default_text:
+        raise HTTPException(status_code=400, detail="id and defaultText are required")
+
+    existed = (
+        db.query(models.GestureDictionary)
+        .filter(models.GestureDictionary.model_label == model_label)
+        .first()
+    )
+    if existed:
+        raise HTTPException(status_code=400, detail="Gesture already exists")
+
+    row = models.GestureDictionary(
+        model_label=model_label,
+        default_text=default_text,
+        is_active=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "id": str(row.model_label),
+        "name": f"Cử chỉ {row.model_label}",
+        "defaultText": row.default_text,
+        "isActive": bool(getattr(row, "is_active", True)),
+    }
+
+@router.put("/gestures/{model_label}")
+def admin_update_gesture(
+    model_label: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    row = (
+        db.query(models.GestureDictionary)
+        .filter(models.GestureDictionary.model_label == model_label)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Gesture not found")
+
+    default_text = str(payload.get("defaultText", "")).strip()
+    if not default_text:
+        raise HTTPException(status_code=400, detail="defaultText is required")
+
+    row.default_text = default_text
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "id": str(row.model_label),
+        "name": f"Cử chỉ {row.model_label}",
+        "defaultText": row.default_text,
+        "isActive": bool(getattr(row, "is_active", True)),
+    }
+
+@router.delete("/gestures/{model_label}")
+def admin_delete_gesture(
+    model_label: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    row = (
+        db.query(models.GestureDictionary)
+        .filter(models.GestureDictionary.model_label == model_label)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Gesture not found")
+
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+@router.post("/samples/download")
+def download_selected_samples(
+    sample_ids: list[int],
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    if not sample_ids:
+        raise HTTPException(status_code=400, detail="sample_ids is empty")
+
+    rows = (
+        db.query(models.GestureSample)
+        .filter(models.GestureSample.id.in_(sample_ids))
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No samples found")
+
+    tmp = NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp_path = tmp.name
+    tmp.close()
+
+    backend_root = Path(__file__).resolve().parents[2]
+    sample_root = backend_root / "data" / "user_samples"
+
+    added_count = 0
+
+    with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for s in rows:
+            raw_path = str(getattr(s, "image_path", "") or "").strip()
+            if not raw_path:
+                continue
+
+            filename = Path(raw_path).name
+            p = sample_root / str(s.user_id) / str(s.label) / filename
+
+            print("sample", s.id, "raw:", raw_path)
+            print("resolved:", p)
+            print("exists:", p.exists())
+
+            if not p.exists():
+                continue
+
+            arcname = f"user_{s.user_id}/label_{s.label}/{filename}"
+            zf.write(p, arcname=arcname)
+            added_count += 1
+
+    if added_count == 0:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file ảnh vật lý để nén")
+
+    filename = f"selected_samples.zip"
+    return FileResponse(tmp_path, media_type="application/zip", filename=filename)
+
+
 
 
 

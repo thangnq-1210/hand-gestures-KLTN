@@ -5,25 +5,27 @@ from sqlalchemy import text
 from .core.config import setup_cors
 from .db import engine, Base, get_db
 from . import models
-
 from .api.gesture import router as gesture_router
 from .api.collect import router as collect_router
 from .api.tts import router as tts_router
 from .api.auth import router as auth_router
-
 from .api.gesture_predict import router as gesture_predict_router
 from .api.gesture import router as gesture_mapping_router
-
 from .api.admin import router as admin_router
-
 from .api.stats import router as stats_router
+from .api.caregiver import router as caregiver_router
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="V-HAND API Documentation",
     version="1.0.0",
 )
+snapshot_dir = Path("backend/data/prediction_snapshots")
+snapshot_dir.mkdir(parents=True, exist_ok=True)
 
+app.mount("/prediction-snapshots", StaticFiles(directory=str(snapshot_dir)), name="prediction-snapshots")
 setup_cors(app)
 
 
@@ -47,3 +49,4 @@ app.include_router(collect_router)
 app.include_router(tts_router)
 app.include_router(admin_router)
 app.include_router(stats_router)
+app.include_router(caregiver_router)

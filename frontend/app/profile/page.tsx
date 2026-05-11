@@ -3,20 +3,19 @@
 import type React from "react"
 
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
+import ProtectedPage from "@/components/auth/protected-page"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useState, useEffect } from "react"
-import { AlertCircle, CheckCircle } from "lucide-react"
+import { AlertCircle, CheckCircle, ArrowLeft } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 
 export default function ProfilePage() {
   const { user, isAuthenticated, updateProfile, changePassword } = useAuth()
-  const router = useRouter()
   const [name, setName] = useState("")
   const [language, setLanguage] = useState<"vi" | "en">("vi")
   const [disabilityLevel, setDisabilityLevel] = useState<"none" | "light" | "moderate" | "severe">("none")
@@ -27,17 +26,17 @@ export default function ProfilePage() {
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push("/login")
-      return
-    }
+    // if (!isAuthenticated) {
+    //   router.push("/login")
+    //   return
+    // }
 
     if (user) {
       setName(user.name)
       setLanguage(user.preferredLanguage)
       setDisabilityLevel(user.disabilityLevel || "none")
     }
-  }, [user, isAuthenticated, router])
+  }, [user, isAuthenticated])
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,11 +90,21 @@ export default function ProfilePage() {
   }
 
   return (
+    <ProtectedPage allowRoles={["user", "caregiver", "admin"]}>
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
-        <Link href="/" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
 
         <h1 className="text-4xl font-bold text-primary mb-8">Hồ Sơ Cá Nhân</h1>
 
@@ -133,7 +142,7 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                <div className="space-y-2">
+                {/* <div className="space-y-2">
                   <Label htmlFor="language">Ngôn ngữ ưu tiên</Label>
                   <Select value={language} onValueChange={(value) => setLanguage(value as "vi" | "en")}>
                     <SelectTrigger id="language">
@@ -159,7 +168,7 @@ export default function ProfilePage() {
                       <SelectItem value="severe">Nặng - Giao diện tối giản, tất cả text-to-speech</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
+                </div> */}
 
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? "Đang cập nhật..." : "Cập Nhật Hồ Sơ"}
@@ -216,5 +225,6 @@ export default function ProfilePage() {
         </div>
       </div>
     </main>
+    </ProtectedPage>
   )
 }

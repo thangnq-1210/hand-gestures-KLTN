@@ -133,3 +133,129 @@ export async function apiDeleteMyGestureMapping(token: string, modelLabel: strin
   }
 }
 
+export interface CaregiverPatientRelation {
+  id: number
+  caregiver_id: number
+  patient_id: number
+  relation_type?: string | null
+  patient: {
+    id: number
+    email: string
+    name: string
+    role: string
+    preferred_language: string
+    is_active: boolean
+  }
+}
+
+export interface CaregiverPredictionItem {
+  id: number
+  gesture_label: string
+  predicted_text?: string | null
+  confidence: number
+  has_hand: boolean
+  created_at: string
+}
+
+export async function apiCaregiverGetPatients(token: string): Promise<CaregiverPatientRelation[]> {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function apiCaregiverLinkPatient(token: string, patientEmail: string, relationType?: string) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/link`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      patient_email: patientEmail,
+      relation_type: relationType ?? null,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function apiCaregiverUnlinkPatient(token: string, patientId: number) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/${patientId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function apiCaregiverGetPatientProfile(token: string, patientId: number) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/${patientId}/profile`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function apiCaregiverGetPatientPredictions(token: string, patientId: number) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/${patientId}/predictions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function apiCaregiverGetPatientStats(token: string, patientId: number, days = 7) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/${patientId}/stats?days=${days}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function apiCaregiverGetPatientGestureMapping(token: string, patientId: number) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/${patientId}/gesture-mapping`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function apiCaregiverUpdatePatientGestureMapping(
+  token: string,
+  patientId: number,
+  modelLabel: string,
+  customText: string
+) {
+  const res = await fetch(`${API_BASE_URL}/caregiver/patients/${patientId}/gesture-mapping/${modelLabel}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ custom_text: customText }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export type AdminCreateUserPayload = {
+  name: string
+  email: string
+  password: string
+  role: "user" | "caregiver" | "admin"
+}
+
+export async function apiAdminCreateUser(token: string, payload: AdminCreateUserPayload) {
+  const res = await fetch(`${API_BASE_URL}/admin/users`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

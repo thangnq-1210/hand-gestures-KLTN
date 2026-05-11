@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { LogOut, Settings, Home, BarChart3, Hand, Lock, BookOpen, Menu, Contact  } from "lucide-react"
+import { LogOut, Settings, Home, BarChart3, Hand, Lock, BookOpen, Menu, Contact, History } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,9 +21,10 @@ export default function Navigation() {
   const userMenuItems = [
     { href: "/gestures", label: "Quản Lý Cử Chỉ", icon: BookOpen },
     { href: "/statistics", label: "Thống Kê", icon: BarChart3 },
-    { href: "/settings", label: "Cài Đặt Hệ Thống", icon: Settings },
+    // { href: "/settings", label: "Cài Đặt Hệ Thống", icon: Settings },
     { href: "/privacy", label: "Quyền Riêng Tư", icon: Lock },
     { href: "/profile", label: "Hồ Sơ Cá Nhân", icon: Contact },
+    { href: "/history", label: "Lịch Sử Nhận Diện", icon: History },
   ]
 
   const caregiverMenuItems = [
@@ -36,7 +37,7 @@ export default function Navigation() {
   const adminMenuItems = [
     { href: "/admin", label: "Bảng Điều Khiển" },
     { href: "/admin/gestures", label: "Quản Lý Cử Chỉ" },
-    { href: "/admin/logs", label: "Nhật Ký Hệ Thống" },
+    // { href: "/admin/logs", label: "Nhật Ký Hệ Thống" },
   ]
 
   return (

@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/lib/auth-context"
 import { useRouter } from "next/navigation"
+import ProtectedPage from "@/components/auth/protected-page"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -14,10 +15,12 @@ import {
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
+  AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Lock, Trash2, Eye, Shield, AlertCircle, ChevronRight, X, ZoomIn } from "lucide-react"
+import { Lock, Trash2, Eye, Shield, AlertCircle, ChevronRight, X, ZoomIn, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
@@ -94,9 +97,9 @@ export default function PrivacyPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // Redirect an toàn (không push trong render)
-  useEffect(() => {
-    if (!isAuthenticated) router.push("/login")
-  }, [isAuthenticated, router])
+  // useEffect(() => {
+  //   if (!isAuthenticated) router.push("/login")
+  // }, [isAuthenticated, router])
 
   const fetchSamples = useCallback(async () => {
     if (!user?.id) return
@@ -197,14 +200,14 @@ export default function PrivacyPage() {
     }
   }, [user?.id, labelToDelete, samplesByLabel, fetchSamples])
 
-  if (!isAuthenticated) return null
-  if (!user) return null
-  const isAdmin = user.role === "admin"
-
   const showSuccess = useCallback((msg: string) => {
     setSuccessMessage(msg)
     setTimeout(() => setSuccessMessage(null), 3000)
   }, [])
+
+  if (!isAuthenticated) return null
+  if (!user) return null
+  const isAdmin = user.role === "admin"
 
   const handleExportData = () => {
     const userData = {
@@ -238,348 +241,410 @@ export default function PrivacyPage() {
     router.push("/")
   }
 
+  const handleDeleteOne = async (sample: Sample) => {
+    if (!user?.id) return
+
+    setIsDeleting(true)
+    setSamplesError(null)
+    setSuccessMessage(null)
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/collect/sample-file/${user.id}/${sample.label}/${sample.filename}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!res.ok) throw new Error(await res.text())
+
+      await fetchSamples()
+      showSuccess("Đã xoá ảnh thành công!")
+    } catch (e) {
+      console.error(e)
+      setSamplesError("Không thể xoá ảnh.")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
-    <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
-      <div className="max-w-4xl mx-auto">
-        <Link href="/" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại
-        </Link>
-
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-primary mb-2">Bảo Mật & Quyền Riêng Tư</h1>
-          <p className="text-muted-foreground">Quản lý dữ liệu cá nhân của bạn và cài đặt quyền riêng tư</p>
-        </div>
-
-        <Tabs defaultValue="privacy" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="privacy">Quyền Riêng Tư</TabsTrigger>
-            <TabsTrigger value="data">Dữ Liệu</TabsTrigger>
-            <TabsTrigger value="security">Bảo Mật</TabsTrigger>
-            <TabsTrigger value="policy">Chính Sách</TabsTrigger>
-          </TabsList>
-
-          {/* Privacy Tab */}
-          <TabsContent value="privacy" className="space-y-6">
-            <Card className="border-2 border-primary/20 p-6 space-y-6">
-              <h2 className="text-2xl font-bold text-primary flex items-center gap-2">
-                <Eye className="w-6 h-6" />
-                Cài Đặt Quyền Riêng Tư
-              </h2>
-
-              <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-                <div>
-                  <Label className="text-base font-semibold">Cho Phép Thu Thập Dữ Liệu</Label>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Ứng dụng lưu trữ các mẫu cử chỉ của bạn để cải thiện kết quả nhận diện
-                  </p>
-                </div>
-                <Switch checked={dataCollection} onCheckedChange={setDataCollection} />
+    <ProtectedPage allowRoles={["user", "caregiver", "admin"]}>
+      <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Link href="/">
+                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                    <ArrowLeft className="w-4 h-4" />
+                    Quay lại
+                  </Button>
+                </Link>
               </div>
+            </div>
+          </div>
 
-              <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-                <div>
-                  <Label className="text-base font-semibold">Sử Dụng Dữ Liệu Để Huấn Luyện</Label>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Cho phép sử dụng dữ liệu cử chỉ của bạn để huấn luyện model cải tiến
-                  </p>
-                </div>
-                <Switch checked={dataTraining} onCheckedChange={setDataTraining} />
-              </div>
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold text-primary mb-2">Bảo Mật & Quyền Riêng Tư</h1>
+            <p className="text-muted-foreground">Quản lý dữ liệu cá nhân của bạn và cài đặt quyền riêng tư</p>
+          </div>
 
-              <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-                <div>
-                  <Label className="text-base font-semibold">Cho Phép Phân Tích Sử Dụng</Label>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Giúp chúng tôi hiểu cách bạn sử dụng ứng dụng để cải thiện nó
-                  </p>
-                </div>
-                <Switch checked={analytics} onCheckedChange={setAnalytics} />
-              </div>
+          <Tabs defaultValue="data" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              {/* <TabsTrigger value="privacy">Quyền Riêng Tư</TabsTrigger> */}
+              <TabsTrigger value="data">Dữ Liệu</TabsTrigger>
+              <TabsTrigger value="security">Bảo Mật</TabsTrigger>
+              {/* <TabsTrigger value="policy">Chính Sách</TabsTrigger> */}
+            </TabsList>
 
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  Bạn có thể thay đổi các cài đặt này bất kỳ lúc nào. Quyết định của bạn được lưu trữ an toàn và không
-                  được chia sẻ với bất kỳ bên thứ ba nào.
-                </AlertDescription>
-              </Alert>
-            </Card>
-          </TabsContent>
-
-          {/* Data Tab */}
-          <TabsContent value="data" className="space-y-6">
-            <Card className="border-2 border-primary/20 p-6 space-y-6">
-              <div className="flex items-center justify-between">
+            {/* Privacy Tab */}
+            {/* <TabsContent value="privacy" className="space-y-6">
+              <Card className="border-2 border-primary/20 p-6 space-y-6">
                 <h2 className="text-2xl font-bold text-primary flex items-center gap-2">
-                  <Shield className="w-6 h-6" />
-                  Quản Lý Dữ Liệu Của Bạn
+                  <Eye className="w-6 h-6" />
+                  Cài Đặt Quyền Riêng Tư
                 </h2>
-                <Button variant="outline" onClick={fetchSamples} disabled={isSamplesLoading}>
-                  Tải lại
-                </Button>
-              </div>
 
-              {samplesError && (
-                <Alert variant="destructive">
+                <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
+                  <div>
+                    <Label className="text-base font-semibold">Cho Phép Thu Thập Dữ Liệu</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Ứng dụng lưu trữ các mẫu cử chỉ của bạn để cải thiện kết quả nhận diện
+                    </p>
+                  </div>
+                  <Switch checked={dataCollection} onCheckedChange={setDataCollection} />
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
+                  <div>
+                    <Label className="text-base font-semibold">Sử Dụng Dữ Liệu Để Huấn Luyện</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Cho phép sử dụng dữ liệu cử chỉ của bạn để huấn luyện model cải tiến
+                    </p>
+                  </div>
+                  <Switch checked={dataTraining} onCheckedChange={setDataTraining} />
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-secondary/10 rounded-lg border border-secondary/20">
+                  <div>
+                    <Label className="text-base font-semibold">Cho Phép Phân Tích Sử Dụng</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Giúp chúng tôi hiểu cách bạn sử dụng ứng dụng để cải thiện nó
+                    </p>
+                  </div>
+                  <Switch checked={analytics} onCheckedChange={setAnalytics} />
+                </div>
+
+                <Alert>
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{samplesError}</AlertDescription>
+                  <AlertDescription>
+                    Bạn có thể thay đổi các cài đặt này bất kỳ lúc nào. Quyết định của bạn được lưu trữ an toàn và không
+                    được chia sẻ với bất kỳ bên thứ ba nào.
+                  </AlertDescription>
                 </Alert>
-              )}
+              </Card>
+            </TabsContent> */}
 
-              {successMessage && (
-                <Alert className="border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100">
-                  <AlertCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  <AlertDescription>{successMessage}</AlertDescription>
-                </Alert>
-              )}
+            {/* Data Tab */}
+            <TabsContent value="data" className="space-y-6">
+              <Card className="border-2 border-primary/20 p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-primary flex items-center gap-2">
+                    <Shield className="w-6 h-6" />
+                    Quản Lý Dữ Liệu Của Bạn
+                  </h2>
+                  <Button variant="outline" onClick={fetchSamples} disabled={isSamplesLoading}>
+                    Tải lại
+                  </Button>
+                </div>
 
-              <div className="space-y-4 p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-                <h3 className="font-semibold text-foreground mb-3">Dữ Liệu Cử Chỉ Thu Thập</h3>
+                {samplesError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{samplesError}</AlertDescription>
+                  </Alert>
+                )}
 
-                {isSamplesLoading ? (
-                  <p className="text-sm text-muted-foreground">Đang tải danh sách mẫu...</p>
-                ) : (
-                  <div className="grid gap-3">
-                    {gestureClasses.map((gesture) => {
-                      const list = samplesByLabel[gesture.id] ?? []
-                      return (
-                        <Dialog key={gesture.id}>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              className="w-full justify-between p-4 h-auto border border-border bg-background hover:bg-secondary/20"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className="bg-primary/10 p-2 rounded-full">
-                                  <Eye className="w-4 h-4 text-primary" />
+                {successMessage && (
+                  <Alert className="border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100">
+                    <AlertCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    <AlertDescription>{successMessage}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="space-y-4 p-4 bg-secondary/10 rounded-lg border border-secondary/20">
+                  <h3 className="font-semibold text-foreground mb-3">Dữ Liệu Cử Chỉ Thu Thập</h3>
+
+                  {isSamplesLoading ? (
+                    <p className="text-sm text-muted-foreground">Đang tải danh sách mẫu...</p>
+                  ) : (
+                    <div className="grid gap-3">
+                      {gestureClasses.map((gesture) => {
+                        const list = samplesByLabel[gesture.id] ?? []
+                        return (
+                          <Dialog key={gesture.id}>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                className="w-full justify-between p-4 h-auto border border-border bg-background hover:bg-secondary/20"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="bg-primary/10 p-2 rounded-full">
+                                    <Eye className="w-4 h-4 text-primary" />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="font-semibold">{gesture.name}</p>
+                                    <p className="text-xs text-muted-foreground">{gesture.text}</p>
+                                  </div>
                                 </div>
-                                <div className="text-left">
-                                  <p className="font-semibold">{gesture.name}</p>
-                                  <p className="text-xs text-muted-foreground">{gesture.text}</p>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="secondary">{list.length} mẫu</Badge>
+                                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
                                 </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge variant="secondary">{list.length} mẫu</Badge>
-                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                              </div>
-                            </Button>
-                          </DialogTrigger>
+                              </Button>
+                            </DialogTrigger>
 
-                          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle className="flex justify-between items-center pr-8">
-                                <span>
-                                  Mẫu cử chỉ: {gesture.name} ({list.length})
-                                </span>
-                                {/* {list.length > 0 && (
-                                  <Button variant="destructive" size="sm" onClick={() => setLabelToDelete(gesture.id)}>
-                                    Xóa tất cả
-                                  </Button>
-                                )} */}
-                                {isAdmin && list.length > 0 && (
+                            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                              <DialogHeader>
+                                <DialogTitle className="flex justify-between items-center pr-8">
+                                  <span>
+                                    Mẫu cử chỉ: {gesture.name} ({list.length})
+                                  </span>
+                                  {/* {isAdmin && list.length > 0 && (
+                                    <Button variant="destructive" size="sm" onClick={() => setLabelToDelete(gesture.id)}>
+                                      Xóa tất cả
+                                    </Button>
+                                  )} */}
+                                  {list.length > 0 && (
                                   <Button variant="destructive" size="sm" onClick={() => setLabelToDelete(gesture.id)}>
                                     Xóa tất cả
                                   </Button>
                                 )}
-                              </DialogTitle>
-                            </DialogHeader>
+                                </DialogTitle>
+                              </DialogHeader>
 
-                            {list.length === 0 ? (
-                              <div className="text-center py-12 text-muted-foreground">
-                                Chưa có mẫu nào được thu thập cho cử chỉ này.
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 py-4">
-                                {list.map((s) => {
-                                  const fullUrl = `${API_BASE_URL}${s.image_url}`
-                                  return (
-                                    <div
-                                      key={s.id}
-                                      className="group relative aspect-video rounded-md overflow-hidden border bg-muted"
-                                    >
-                                      {/* <img src={fullUrl} alt={`Sample ${s.id}`} className="w-full h-full object-cover" /> */}
-                                      {token ? (
-                                        <AuthedImage url={fullUrl} token={token} className="w-full h-full object-cover" />
-                                      ) : (
-                                        <div className="w-full h-full bg-muted" />
-                                      )}
-                                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                        <Button
-                                          size="icon"
-                                          variant="secondary"
-                                          className="h-8 w-8"
-                                          onClick={() => setViewingImage(fullUrl)}
-                                        >
-                                          <ZoomIn className="h-4 w-4" />
-                                        </Button>
-                                        {/* <Button
-                                          size="icon"
-                                          variant="destructive"
-                                          className="h-8 w-8"
-                                          onClick={() => setSampleToDelete(s)}
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button> */}
-                                        {isAdmin && (
+                              {list.length === 0 ? (
+                                <div className="text-center py-12 text-muted-foreground">
+                                  Chưa có mẫu nào được thu thập cho cử chỉ này.
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 py-4">
+                                  {list.map((s) => {
+                                    const fullUrl = `${API_BASE_URL}${s.image_url}`
+                                    return (
+                                      <div
+                                        key={s.id}
+                                        className="group relative aspect-video rounded-md overflow-hidden border bg-muted"
+                                      >
+                                        {/* <img src={fullUrl} alt={`Sample ${s.id}`} className="w-full h-full object-cover" /> */}
+                                        {token ? (
+                                          <AuthedImage url={fullUrl} token={token} className="w-full h-full object-cover" />
+                                        ) : (
+                                          <div className="w-full h-full bg-muted" />
+                                        )}
+                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                           <Button
                                             size="icon"
-                                            variant="destructive"
+                                            variant="secondary"
                                             className="h-8 w-8"
-                                            onClick={() => setSampleToDelete(s)}
+                                            onClick={() => setViewingImage(fullUrl)}
                                           >
-                                            <Trash2 className="h-4 w-4" />
+                                            <ZoomIn className="h-4 w-4" />
                                           </Button>
-                                        )}
+                                          {/* {isAdmin && (
+                                            <Button
+                                              size="icon"
+                                              variant="destructive"
+                                              className="h-8 w-8"
+                                              onClick={() => setSampleToDelete(s)}
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          )} */}
+                                          <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                              <Button
+                                                size="icon"
+                                                variant="destructive"
+                                                className="h-8 w-8"
+                                                disabled={isDeleting}
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                              </Button>
+                                            </AlertDialogTrigger>
 
+                                            <AlertDialogContent>
+                                              <AlertDialogHeader>
+                                                <AlertDialogTitle>Xoá ảnh này?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                  Bạn có chắc muốn xoá ảnh mẫu này không? Hành động này không thể hoàn tác.
+                                                </AlertDialogDescription>
+                                              </AlertDialogHeader>
+
+                                              <div className="flex justify-end gap-3">
+                                                <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>
+                                                  Huỷ
+                                                </AlertDialogCancel>
+                                                <AlertDialogAction
+                                                  onClick={() => handleDeleteOne(s)}
+                                                  className="bg-red-500 hover:bg-red-600"
+                                                  disabled={isDeleting}
+                                                >
+                                                  {isDeleting ? "Đang xoá..." : "Xoá"}
+                                                </AlertDialogAction>
+                                              </div>
+                                            </AlertDialogContent>
+                                          </AlertDialog>
+
+                                        </div>
                                       </div>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </DialogContent>
-                        </Dialog>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* (Giữ lại các phần khác của bạn nếu cần) */}
-              <div className="space-y-4 p-4 bg-destructive/10 rounded-lg border border-destructive/20">
-                <div>
-                  <h3 className="font-semibold text-destructive mb-2">Xoá Tất Cả Dữ Liệu</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Xoá vĩnh viễn tất cả dữ liệu của bạn. Hành động này không thể hoàn tác.
-                  </p>
-                  {/* <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}> */}
-                  <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
-                    <Button variant="destructive" className="w-full" onClick={() => setShowDeleteConfirm(true)}>
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Xoá Tất Cả Dữ Liệu
-                    </Button>
-                    {/* ===== Confirm delete ONE sample ===== */}
-                    {isAdmin && (
-                      <AlertDialog open={!!sampleToDelete} onOpenChange={(open) => !open && setSampleToDelete(null)}>
-                        <AlertDialogContent>
-                          <AlertDialogTitle>Xoá mẫu này?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Bạn có chắc muốn xoá mẫu <b>{sampleToDelete?.filename}</b> (nhãn <b>{sampleToDelete?.label}</b>) không?
-                            Hành động này không thể hoàn tác.
-                          </AlertDialogDescription>
-
-                          <div className="flex gap-3">
-                            <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={confirmDeleteSample}
-                              className="bg-destructive"
-                              disabled={isDeleting}
-                            >
-                              {isDeleting ? "Đang xoá..." : "Xoá"}
-                            </AlertDialogAction>
-                          </div>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    )}
-                    {/* ===== Confirm delete ALL samples of a gesture ===== */}
-                    {isAdmin && (
-                      <AlertDialog open={!!labelToDelete} onOpenChange={(open) => !open && setLabelToDelete(null)}>
-                        <AlertDialogContent>
-                          <AlertDialogTitle>Xoá tất cả mẫu của cử chỉ này?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Bạn có chắc muốn xoá{" "}
-                            <b>{labelToDelete ? (samplesByLabel[labelToDelete]?.length ?? 0) : 0}</b>{" "}
-                            mẫu của cử chỉ <b>{labelToDelete}</b> không?
-                            Hành động này không thể hoàn tác.
-                          </AlertDialogDescription>
-
-                          <div className="flex gap-3">
-                            <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={confirmDeleteAllForGesture}
-                              className="bg-destructive"
-                              disabled={isDeleting}
-                            >
-                              {isDeleting ? "Đang xoá..." : "Xoá tất cả"}
-                            </AlertDialogAction>
-                          </div>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    )}
-                    {isAdmin && (
-                      <Link href="/admin/samples">
-                        <Button variant="default" className="w-full">
-                          Quản lý dữ liệu huấn luyện
-                        </Button>
-                      </Link>
-                    )}
-                  </Dialog>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </DialogContent>
+                          </Dialog>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            </Card>
-          </TabsContent>
+
+                {/* (Giữ lại các phần khác của bạn nếu cần) */}
+                <div className="space-y-4 p-4 bg-teal/10 rounded-lg border border-teal/20">
+                  <div>
+                    {/* <h3 className="font-semibold text-destructive mb-2">Xoá Tất Cả Dữ Liệu</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Xoá vĩnh viễn tất cả dữ liệu của bạn. Hành động này không thể hoàn tác.
+                    </p> */}
+                    {/* <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}> */}
+                    <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
+                      {/* <Button variant="destructive" className="w-full" onClick={() => setShowDeleteConfirm(true)}>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Xoá Tất Cả Dữ Liệu
+                      </Button> */}
+                      {/* ===== Confirm delete ONE sample ===== */}
+                      {isAdmin && (
+                        <AlertDialog open={!!sampleToDelete} onOpenChange={(open) => !open && setSampleToDelete(null)}>
+                          <AlertDialogContent>
+                            <AlertDialogTitle>Xoá mẫu này?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Bạn có chắc muốn xoá mẫu <b>{sampleToDelete?.filename}</b> (nhãn <b>{sampleToDelete?.label}</b>) không?
+                              Hành động này không thể hoàn tác.
+                            </AlertDialogDescription>
+
+                            <div className="flex gap-3">
+                              <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={confirmDeleteSample}
+                                className="bg-destructive"
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? "Đang xoá..." : "Xoá"}
+                              </AlertDialogAction>
+                            </div>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
+                      {/* ===== Confirm delete ALL samples of a gesture ===== */}                        <AlertDialog open={!!labelToDelete} onOpenChange={(open) => !open && setLabelToDelete(null)}>
+                          <AlertDialogContent>
+                            <AlertDialogTitle>Xoá tất cả mẫu của cử chỉ này?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Bạn có chắc muốn xoá{" "}
+                              <b>{labelToDelete ? (samplesByLabel[labelToDelete]?.length ?? 0) : 0}</b>{" "}
+                              mẫu của cử chỉ <b>{labelToDelete}</b> không?
+                              Hành động này không thể hoàn tác.
+                            </AlertDialogDescription>
+
+                            <div className="flex justify-end gap-3">
+                              <AlertDialogCancel className="hover:bg-primary/10 hover:text-primary" disabled={isDeleting}>Huỷ</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={confirmDeleteAllForGesture}
+                                className="bg-red-500 hover:bg-red-600"
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? "Đang xoá..." : "Xoá tất cả"}
+                              </AlertDialogAction>
+                            </div>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      
+                      {isAdmin && (
+                        <Link href="/admin/samples">
+                          <Button variant="default" className="w-full">
+                            Quản lý dữ liệu huấn luyện
+                          </Button>
+                        </Link>
+                      )}
+                    </Dialog>
+                  </div>
+                </div>
+              </Card>
+            </TabsContent>
 
 
 
-          {/* Security Tab */}
-          <TabsContent value="security" className="space-y-6">
-            <Card className="border-2 border-primary/20 p-6 space-y-6">
-              <h2 className="text-2xl font-bold text-primary flex items-center gap-2">
-                <Lock className="w-6 h-6" />
-                Bảo Mật Tài Khoản
-              </h2>
-              <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20">
-                <p className="font-semibold text-green-600 mb-1">Trạng Thái Bảo Mật: Tốt</p>
-                <p className="text-sm text-muted-foreground">Tài khoản của bạn được bảo vệ tốt</p>
-              </div>
-            </Card>
-          </TabsContent>
+            {/* Security Tab */}
+            <TabsContent value="security" className="space-y-6">
+              <Card className="border-2 border-primary/20 p-6 space-y-6">
+                <h2 className="text-2xl font-bold text-primary flex items-center gap-2">
+                  <Lock className="w-6 h-6" />
+                  Bảo Mật Tài Khoản
+                </h2>
+                <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20">
+                  <p className="font-semibold text-green-600 mb-1">Trạng Thái Bảo Mật: Tốt</p>
+                  <p className="text-sm text-muted-foreground">Tài khoản của bạn được bảo vệ tốt</p>
+                </div>
+              </Card>
+            </TabsContent>
 
-          {/* Policy Tab */}
-          <TabsContent value="policy" className="space-y-6">
-            <Card className="border-2 border-primary/20 p-6 space-y-6">
-              <h2 className="text-2xl font-bold text-primary mb-4">Chính Sách Quyền Riêng Tư</h2>
-              <p className="text-sm text-muted-foreground">...</p>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+            {/* Policy Tab */}
+            <TabsContent value="policy" className="space-y-6">
+              <Card className="border-2 border-primary/20 p-6 space-y-6">
+                <h2 className="text-2xl font-bold text-primary mb-4">Chính Sách Quyền Riêng Tư</h2>
+                <p className="text-sm text-muted-foreground">...</p>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
 
-      {/* Zoom dialog */}
-      <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 border-none bg-transparent shadow-none [&>button]:hidden">
-          {/* [&>button]:hidden => ẩn nút X mặc định của DialogContent */}
+        {/* Zoom dialog */}
+        <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
+          <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 border-none bg-transparent shadow-none [&>button]:hidden">
+            {/* [&>button]:hidden => ẩn nút X mặc định của DialogContent */}
 
-          <div className="relative w-full h-full flex items-center justify-center">
-            {/* Nút X của bạn */}
-            <DialogClose asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute top-2 right-2 text-destructive hover:bg-destructive/10"
-                onClick={() => setViewingImage(null)}
-              >
-                <X className="h-6 w-6 " />
-              </Button>
-            </DialogClose>
+            <div className="relative w-full h-full flex items-center justify-center">
+              {/* Nút X của bạn */}
+              <DialogClose asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="absolute top-2 right-2 text-destructive hover:bg-destructive/10"
+                  onClick={() => setViewingImage(null)}
+                >
+                  <X className="h-6 w-6 " />
+                </Button>
+              </DialogClose>
 
-            {/* {viewingImage && (
+              {/* {viewingImage && (
               <img
                 src={viewingImage}
                 alt="Full size preview"
                 className="max-w-[90vw] max-h-[90vh] object-contain"
               />
             )} */}
-            {viewingImage && token && (
-              <AuthedImage
-                url={viewingImage}
-                token={token}
-                className="max-w-[90vw] max-h-[90vh] object-contain"
-              />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </main>
+              {viewingImage && token && (
+                <AuthedImage
+                  url={viewingImage}
+                  token={token}
+                  className="max-w-[90vw] max-h-[90vh] object-contain"
+                />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </main>
+    </ProtectedPage>
   )
 }

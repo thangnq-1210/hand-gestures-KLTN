@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from ..db import get_db
 from .. import models
+from ..models.caregiver_relations import CaregiverRelation
 from app.models.user import User
 
 SECRET_KEY = settings.SECRET_KEY
@@ -82,3 +83,31 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
             detail="Admin only"
         )
     return user
+
+def require_caregiver(user: User = Depends(get_current_user)) -> User:
+    if user.role != "caregiver":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Caregiver only"
+        )
+    return user
+
+def ensure_caregiver_has_patient(
+    caregiver_id: int,
+    patient_id: int,
+    db: Session,
+):
+    rel = (
+        db.query(CaregiverRelation)
+        .filter(
+            CaregiverRelation.caregiver_id == caregiver_id,
+            CaregiverRelation.patient_id == patient_id,
+        )
+        .first()
+    )
+    if not rel:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền truy cập bệnh nhân này",
+        )
+    return rel

@@ -79,7 +79,7 @@ export default function AdminPage() {
         </div>
 
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 hidden sm:block" />
               <span className="hidden sm:inline">Tổng Quan</span>
@@ -95,11 +95,11 @@ export default function AdminPage() {
               <span className="hidden sm:inline">Dữ Liệu</span>
               <span className="sm:hidden">Data</span>
             </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center gap-2">
+            {/* <TabsTrigger value="settings" className="flex items-center gap-2">
               <Settings className="w-4 h-4 hidden sm:block" />
               <span className="hidden sm:inline">Cài Đặt</span>
               <span className="sm:hidden">Cấu Hình</span>
-            </TabsTrigger>
+            </TabsTrigger> */}
           </TabsList>
 
           {/* Overview Tab */}

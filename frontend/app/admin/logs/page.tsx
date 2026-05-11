@@ -1,10 +1,12 @@
 "use client"
 
 import { useAuth } from "@/lib/auth-context"
+import ProtectedPage from "@/components/auth/protected-page"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AlertCircle, CheckCircle2, Info } from "lucide-react"
+import { AlertCircle, CheckCircle2, Info, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
@@ -88,11 +90,21 @@ export default function AdminLogsPage() {
   }
 
   return (
+    <ProtectedPage allowRoles={["admin"]}>
     <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        <Link href="/admin" className="text-primary hover:underline text-sm mb-6 inline-block">
-          ← Quay lại Admin
-        </Link>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại Admin
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
 
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-primary mb-2">Nhật Ký Hệ Thống</h1>
@@ -147,5 +159,6 @@ export default function AdminLogsPage() {
         </Tabs>
       </div>
     </main>
+    </ProtectedPage>
   )
 }

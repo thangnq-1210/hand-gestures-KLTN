@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useAuth } from "@/lib/auth-context"
 import GestureRecognition from "@/components/gesture-recognition"
 import GestureMapping from "@/components/gesture-mapping"
 import RecognitionHistory from "@/components/recognition-history"
@@ -9,34 +8,16 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export default function Page() {
-  const { user } = useAuth()
-  const [history, setHistory] = useState<
-    Array<{ id: string; gesture: string; text: string; confidence: number; timestamp: Date }>
-  >([])
   const [currentGesture, setCurrentGesture] = useState<{ gesture: string; text: string; confidence: number } | null>(
     null,
   )
-
   const handleGestureDetected = (gesture: string, text: string, confidence: number) => {
     setCurrentGesture({ gesture, text, confidence })
-
-    const newEntry = {
-      id: Date.now().toString(),
-      gesture,
-      text,
-      confidence,
-      timestamp: new Date(),
-    }
-
-    setHistory((prev) => [newEntry, ...prev].slice(0, 10))
   }
-
-  const handleClearHistory = () => {
-    setHistory([])
-    setCurrentGesture(null)
-  }
+  const [recognitionMode, setRecognitionMode] = useState<"resnet" | "landmark">("resnet")
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/10 p-4 md:p-8">
@@ -56,6 +37,14 @@ export default function Page() {
             <p className="text-lg text-muted-foreground mt-2">
               Hỗ trợ giao tiếp cho người khiếm khuyết thông qua nhận diện cử chỉ tay theo thời gian thực
             </p> */}
+            <div className="mb-6">
+              <Tabs value={recognitionMode} onValueChange={(v) => setRecognitionMode(v as "resnet" | "landmark")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="resnet">Mô hình Resnet</TabsTrigger>
+                  <TabsTrigger value="landmark">Hand Landmarks</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
           </div>
         </div>
 
@@ -65,7 +54,11 @@ export default function Page() {
           <div className="lg:col-span-2">
             <Card className="bg-card border-2 border-primary/20 shadow-lg">
               <div className="p-6">
-                <GestureRecognition onGestureDetected={handleGestureDetected} />
+                {/* <GestureRecognition onGestureDetected={handleGestureDetected} /> */}
+                <GestureRecognition
+                  recognitionMode={recognitionMode}
+                  onGestureDetected={handleGestureDetected}
+                />
               </div>
             </Card>
           </div>
@@ -82,16 +75,18 @@ export default function Page() {
 
         {/* Bottom: History */}
         <Card className="bg-card border-2 border-accent/20 shadow-lg">
-          <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
+          <div className="p-6 space-y-4">
+            <div className="flex justify-between items-center gap-3 flex-wrap">
               <h2 className="text-2xl font-bold text-teal-500">Lịch Sử Nhận Diện</h2>
-              {history.length > 0 && (
-                <Button onClick={handleClearHistory} variant="outline" className="text-sm bg-transparent">
-                  Xóa Lịch Sử
+
+              <Link href="/history">
+                <Button variant="outline" className="text-sm hover:bg-teal-600">
+                  Xem toàn bộ lịch sử
                 </Button>
-              )}
+              </Link>
             </div>
-            <RecognitionHistory history={history} />
+
+            <RecognitionHistory limit={4} pageSize={4} showPagination={false} />
           </div>
         </Card>
       </div>

@@ -1,159 +1,266 @@
 "use client"
 
+import { useEffect, useState, useCallback } from "react"
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { BarChart3, Users, TrendingUp } from "lucide-react"
+import Link from "next/link"
+import ProtectedPage from "@/components/auth/protected-page"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { AlertCircle, BarChart3, ArrowLeft } from "lucide-react"
+import {
+  apiCaregiverGetPatients,
+  apiCaregiverGetPatientStats,
+  type CaregiverPatientRelation,
+} from "@/lib/api"
+
+type CaregiverStats = {
+  total_predictions: number
+  most_used_gesture: string
+  avg_confidence: number
+  gesture_stats: { gesture: string; count: number }[]
+  time_stats: { time: string; predictions: number }[]
+  days: number
+}
 
 export default function CaregiverStatisticsPage() {
-  const { user, isAuthenticated } = useAuth()
-  const router = useRouter()
+  const { token, isAuthenticated, user } = useAuth()
 
-  if (!isAuthenticated || user?.role !== "caregiver") {
-    router.push("/login")
-    return null
-  }
+  const [patients, setPatients] = useState<CaregiverPatientRelation[]>([])
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null)
+  const [stats, setStats] = useState<CaregiverStats | null>(null)
+  const [isLoadingPatients, setIsLoadingPatients] = useState(true)
+  const [isLoadingStats, setIsLoadingStats] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const mockUserStats = [
-    {
-      userId: "user_1",
-      name: "Bệnh Nhân 1",
-      totalPredictions: 234,
-      topGesture: "Tôi mệt",
-      usageHours: [2, 5, 3, 8, 4, 6, 7],
-      successRate: 92,
-    },
-    {
-      userId: "user_2",
-      name: "Bệnh Nhân 2",
-      totalPredictions: 156,
-      topGesture: "Giúp tôi",
-      usageHours: [1, 3, 2, 4, 3, 5, 2],
-      successRate: 88,
-    },
-  ]
+  // useEffect(() => {
+  //   if (!isAuthenticated) router.push("/login")
+  // }, [isAuthenticated, router])
+
+  // useEffect(() => {
+  //   if (isAuthenticated && user && user.role !== "caregiver") {
+  //     router.push("/")
+  //   }
+  // }, [isAuthenticated, user, router])
+
+  const loadPatients = useCallback(async () => {
+    if (!token) return
+
+    try {
+      setIsLoadingPatients(true)
+      setError(null)
+
+      const data = await apiCaregiverGetPatients(token)
+      setPatients(data)
+
+      if (data.length > 0) {
+        setSelectedPatientId(data[0].patient.id)
+      } else {
+        setSelectedPatientId(null)
+      }
+    } catch (e: any) {
+      console.error(e)
+      setError(e?.message || "Không tải được danh sách bệnh nhân.")
+    } finally {
+      setIsLoadingPatients(false)
+    }
+  }, [token])
+
+  const loadStats = useCallback(async () => {
+    if (!token || !selectedPatientId) return
+
+    try {
+      setIsLoadingStats(true)
+      setError(null)
+
+      const data = await apiCaregiverGetPatientStats(token, selectedPatientId, 7)
+      setStats(data)
+    } catch (e: any) {
+      console.error(e)
+      setError(e?.message || "Không tải được thống kê bệnh nhân.")
+    } finally {
+      setIsLoadingStats(false)
+    }
+  }, [token, selectedPatientId])
+
+  useEffect(() => {
+    void loadPatients()
+  }, [loadPatients])
+
+  useEffect(() => {
+    if (selectedPatientId) {
+      void loadStats()
+    } else {
+      setStats(null)
+    }
+  }, [selectedPatientId, loadStats])
+
+  const selectedPatient = patients.find((p) => p.patient.id === selectedPatientId)
+
+  if (!isAuthenticated || !user || user.role !== "caregiver") return null
 
   return (
-    <main className="min-h-screen pt-20 pb-12">
-      <div className="max-w-7xl mx-auto px-4 md:px-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Thống Kê Bệnh Nhân</h1>
-          <p className="text-muted-foreground">Xem thống kê chi tiết cho từng người dùng bạn quản lý</p>
+    <ProtectedPage allowRoles={["caregiver"]}>
+    <main className="min-h-screen bg-gradient-to-br from-background to-secondary/10 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Link href="/admin">
+                <Button variant="ghost" size="sm" className="gap-2 hover:bg-teal-600">
+                  <ArrowLeft className="w-4 h-4" />
+                  Quay lại
+                </Button>
+              </Link>
+            </div>
+          </div>
         </div>
 
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="overview">Tổng Quan</TabsTrigger>
-            <TabsTrigger value="individual">Chi Tiết Từng Người</TabsTrigger>
-            <TabsTrigger value="trends">Xu Hướng</TabsTrigger>
-          </TabsList>
+        <div>
+          <h1 className="text-3xl font-bold text-primary">Thống kê bệnh nhân</h1>
+          <p className="text-muted-foreground">
+            Theo dõi thống kê sử dụng thật của từng bệnh nhân
+          </p>
+        </div>
 
-          <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Users className="w-4 h-4 text-primary" />
-                    Tổng Bệnh Nhân
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{mockUserStats.length}</div>
-                </CardContent>
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-xl font-bold text-primary flex items-center gap-2">
+                <BarChart3 className="w-5 h-5" />
+                Chọn bệnh nhân
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Chọn một bệnh nhân để xem thống kê 7 ngày gần nhất
+              </p>
+            </div>
+
+            <Button variant="outline" onClick={() => void loadPatients()} disabled={isLoadingPatients}>
+              {isLoadingPatients ? "Đang tải..." : "Tải lại"}
+            </Button>
+          </div>
+
+          {isLoadingPatients ? (
+            <p className="text-sm text-muted-foreground">Đang tải danh sách bệnh nhân...</p>
+          ) : patients.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Bạn chưa liên kết với bệnh nhân nào.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {patients.map((item) => {
+                const active = item.patient.id === selectedPatientId
+                return (
+                  <Button
+                    key={item.patient.id}
+                    type="button"
+                    variant={active ? "default" : "outline"}
+                    onClick={() => setSelectedPatientId(item.patient.id)}
+                  >
+                    {item.patient.name}
+                  </Button>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        {selectedPatient && (
+          <Card className="p-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-primary">{selectedPatient.patient.name}</h2>
+                <p className="text-sm text-muted-foreground">{selectedPatient.patient.email}</p>
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <Badge variant="outline">
+                  {selectedPatient.patient.preferred_language || "vi"}
+                </Badge>
+                <Badge variant={selectedPatient.patient.is_active ? "secondary" : "destructive"}>
+                  {selectedPatient.patient.is_active ? "Đang hoạt động" : "Không hoạt động"}
+                </Badge>
+                <Link href={`/caregiver/patients/${selectedPatient.patient.id}`}>
+                  <Button size="sm">Xem chi tiết</Button>
+                </Link>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {isLoadingStats ? (
+          <Card className="p-6">
+            <p className="text-sm text-muted-foreground">Đang tải thống kê...</p>
+          </Card>
+        ) : !stats ? (
+          <Card className="p-6">
+            <p className="text-sm text-muted-foreground">Chưa có dữ liệu thống kê.</p>
+          </Card>
+        ) : (
+          <>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card className="p-4">
+                <p className="text-sm text-muted-foreground">Tổng số lần nhận diện</p>
+                <p className="text-2xl font-bold text-primary">{stats.total_predictions}</p>
               </Card>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-primary" />
-                    Tổng Lần Nhận Diện
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">
-                    {mockUserStats.reduce((sum, s) => sum + s.totalPredictions, 0)}
-                  </div>
-                </CardContent>
+              <Card className="p-4">
+                <p className="text-sm text-muted-foreground">Cử chỉ dùng nhiều nhất</p>
+                <p className="text-2xl font-bold text-primary">
+                  {stats.most_used_gesture || "-"}
+                </p>
               </Card>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-primary" />
-                    Tỷ Lệ Thành Công TB
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">
-                    {Math.round(mockUserStats.reduce((sum, s) => sum + s.successRate, 0) / mockUserStats.length)}%
-                  </div>
-                </CardContent>
+              <Card className="p-4">
+                <p className="text-sm text-muted-foreground">Độ tin cậy trung bình</p>
+                <p className="text-2xl font-bold text-primary">
+                  {(stats.avg_confidence * 100).toFixed(1)}%
+                </p>
               </Card>
             </div>
-          </TabsContent>
 
-          <TabsContent value="individual" className="space-y-6">
-            {mockUserStats.map((stat) => (
-              <Card key={stat.userId}>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>{stat.name}</span>
-                    <span className="text-sm font-normal text-green-600">{stat.successRate}% thành công</span>
-                  </CardTitle>
-                  <CardDescription>ID: {stat.userId}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Tổng Lần Nhận Diện</p>
-                      <p className="text-2xl font-bold">{stat.totalPredictions}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Cử Chỉ Hay Dùng Nhất</p>
-                      <p className="text-2xl font-bold">{stat.topGesture}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Trung Bình/Ngày</p>
-                      <p className="text-2xl font-bold">{Math.round(stat.totalPredictions / 30)}</p>
-                    </div>
-                  </div>
+            <Card className="p-6 space-y-4">
+              <h3 className="text-lg font-bold text-primary">Thống kê theo cử chỉ</h3>
 
-                  <div>
-                    <p className="text-sm font-semibold mb-2">Sử Dụng Theo Giờ (7 Ngày Gần Đây)</p>
-                    <div className="flex items-end gap-1 h-24">
-                      {stat.usageHours.map((hour, idx) => (
-                        <div
-                          key={idx}
-                          className="flex-1 bg-primary rounded-t"
-                          style={{
-                            height: `${(hour / Math.max(...stat.usageHours)) * 100}%`,
-                          }}
-                        />
-                      ))}
+              {stats.gesture_stats.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
+              ) : (
+                <div className="space-y-2">
+                  {stats.gesture_stats.map((g) => (
+                    <div
+                      key={g.gesture}
+                      className="flex items-center justify-between border rounded-lg px-4 py-3"
+                    >
+                      <span>Cử chỉ {g.gesture}</span>
+                      <span className="font-bold">{g.count}</span>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </TabsContent>
-
-          <TabsContent value="trends" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Xu Hướng Sử Dụng</CardTitle>
-                <CardDescription>Theo dõi xu hướng sử dụng của các bệnh nhân theo thời gian</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  <p>Biểu đồ xu hướng sẽ được cập nhật dựa trên dữ liệu thực tế</p>
-                  <p className="text-sm">Kết nối API backend để xem dữ liệu chi tiết</p>
+                  ))}
                 </div>
-              </CardContent>
+              )}
             </Card>
-          </TabsContent>
-        </Tabs>
+
+            <Card className="p-6 space-y-4">
+              <h3 className="text-lg font-bold text-primary">Thống kê theo khung giờ</h3>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {stats.time_stats.map((t) => (
+                  <div key={t.time} className="border rounded-lg p-3 text-center">
+                    <p className="text-sm text-muted-foreground">{t.time}</p>
+                    <p className="font-bold">{t.predictions}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </>
+        )}
       </div>
     </main>
+    </ProtectedPage>
   )
 }
